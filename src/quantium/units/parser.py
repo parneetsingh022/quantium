@@ -91,12 +91,23 @@ class _UnitExprParser:
     def _parse_name(self) -> Optional[str]:
         self._skip_ws()
         i0 = self.i
-        if i0 < self.n and (self.s[i0].isalpha() or self.s[i0] == '_'):
-            self.i += 1
-            while self.i < self.n and (self.s[self.i].isalnum() or self.s[self.i] == '_'):
+        if i0 >= self.n:
+            return None
+        ch0 = self.s[i0]
+        # allow Unicode letter or underscore as the first character
+        if not (ch0.isalpha() or ch0 == '_'):
+            return None
+
+        self.i += 1
+        # characters allowed after the first one
+        EXTRA_NAME_CHARS = {'°', 'µ', 'Ω', 'Δ'}
+        while self.i < self.n:
+            ch = self.s[self.i]
+            if ch.isalnum() or ch == '_' or ch in EXTRA_NAME_CHARS:
                 self.i += 1
-            return self.s[i0:self.i]
-        return None
+            else:
+                break
+        return self.s[i0:self.i]
 
     def _parse_signed_int(self) -> int:
         self._skip_ws()

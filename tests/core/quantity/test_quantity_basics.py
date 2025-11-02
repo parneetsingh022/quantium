@@ -3,7 +3,7 @@ import pytest
 import operator
 
 
-from quantium.core.dimensions import LENGTH, TIME, DIM_0
+from quantium.core.dimensions import LENGTH, TIME, TEMPERATURE, DIM_0
 from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as dreg
@@ -348,3 +348,76 @@ def test_compare_with_non_quantity_non_number_raises_typeerror():
     # Message should include the offending type
     assert "Cannot compare LinearQuantity with type" in str(excinfo.value)
     assert "str" in str(excinfo.value)
+
+
+# ----------------------------
+# Delta temperature units: Δ°C, Δ°F, Δ°R
+# ----------------------------
+
+def test_delta_c_to_kelvin():
+    # 10 Δ°C == 10 K (no offset for deltas)
+    q = 10 * u("Δ°C")
+    out = q.to("K")
+    assert math.isclose(shown(out), 10.0)
+    assert out.dim == q.dim
+
+def test_delta_f_to_kelvin():
+    # 18 Δ°F == 10 K  (scale 5/9)
+    q = 18 * u("Δ°F")
+    out = q.to("K")
+    assert math.isclose(shown(out), 10.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+
+def test_delta_r_to_kelvin():
+    # 9 Δ°R == 5 K  (scale 5/9)
+    q = 9 * u("Δ°R")
+    out = q.to("K")
+    assert math.isclose(shown(out), 5.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+
+def test_delta_c_to_delta_f():
+    # 25 Δ°C == 45 Δ°F
+    q = 25 * u("Δ°C")
+    out = q.to("Δ°F")
+    assert math.isclose(shown(out), 45.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+    assert out.unit.name == "Δ°F"
+
+def test_delta_f_to_delta_c_roundtrip_precision():
+    # 123 Δ°F -> Δ°C -> Δ°F should match (within tight tolerance)
+    q = 123 * u("Δ°F")
+    c = q.to("Δ°C")
+    f = c.to("Δ°F")
+    assert math.isclose(shown(f), 123.0, rel_tol=1e-12, abs_tol=0.0)
+
+def test_delta_r_to_delta_c_and_f():
+    # 18 Δ°R == 10 Δ°C == 18 Δ°R; also Δ°F should be 18 * (5/9)*9/5 == 10 Δ°F? Nope.
+    # Better: 10 Δ°C == 18 Δ°R and 10 Δ°C == 18 Δ°F /? Wait:
+    # Relationship: 1 Δ°C = 1 K; 1 Δ°F = 5/9 K; 1 Δ°R = 5/9 K.
+    # So 18 Δ°R -> K = 18*(5/9)=10 K -> Δ°C = 10; -> Δ°F = 10*(9/5)=18.
+    q = 18 * u("Δ°R")
+    to_c = q.to("Δ°C")
+    to_f = q.to("Δ°F")
+    assert math.isclose(shown(to_c), 10.0, rel_tol=1e-12)
+    assert math.isclose(shown(to_f), 18.0, rel_tol=1e-12)
+
+def test_delta_addition_across_units_uses_si_and_returns_left_unit():
+    # 5 Δ°C + 9 Δ°R: 9 Δ°R = 9*(5/9)=5 K; 5 Δ°C = 5 K → sum = 10 K
+    # Should return in the left operand's unit (Δ°C) with value 10.
+    q1 = 5 * u("Δ°C")
+    q2 = 9 * u("Δ°R")
+    s = q1 + q2
+    assert s.unit.name == "Δ°C"
+    assert math.isclose(shown(s), 10.0, rel_tol=1e-12)
+
+def test_delta_string_conversion_parsing_symbols():
+    # Ensure the parser resolves the unicode “Δ” names
+    q = 12.5 * u("Δ°F")
+    out = q.to("Δ°C")
+    # 12.5 Δ°F -> K = 12.5*(5/9)= 6.944444..., so Δ°C = same numeric as K
+    assert math.isclose(shown(out), 12.5 * (5/9), rel_tol=1e-12)
+
+def test_delta_units_keep_temperature_dimension():
+    for sym in ("Δ°C", "Δ°F", "Δ°R"):
+        q = 1 * u(sym)
+        assert q.dim == TEMPERATURE
