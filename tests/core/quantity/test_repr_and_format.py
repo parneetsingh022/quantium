@@ -250,7 +250,7 @@ def test_repr_upgrades_only_composed_si(monkeypatch):
     assert f"{q_current}" == "1 A"
 
     # kg·m/s² -> N (preferred symbol for force)
-    # wrap s as a Quantity: (1 * s) ** 2, not (s ** 2)
+    # wrap s as a LinearQuantity: (1 * s) ** 2, not (s ** 2)
     q_force = (2 * kg) * (3 * m) / ((1 * s) ** 2)
     assert f"{q_force}" == "6 N"
 
@@ -342,7 +342,7 @@ def test_pressure_symbol_and_prefix(monkeypatch):
     mm = ureg.get("mm")   # 1e-3 m
 
     # mN/mm² -> (1e-3) / (1e-3)^2 = 1e3 -> kPa
-    # construct as a Quantity / Quantity so the unit algebra flows through
+    # construct as a LinearQuantity / LinearQuantity so the unit algebra flows through
     q_kPa = (1 * mN) / ((1 * mm) ** 2)
     assert f"{q_kPa}" == "1 kPa"
 
@@ -430,7 +430,7 @@ def test_dimensionless_prints_number(monkeypatch):
 # (These tests use the *real* prettifier)
 # -------------------------------
 
-@pytest.mark.regression(reason="Issue #72: Quantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
+@pytest.mark.regression(reason="Issue #72: LinearQuantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
 def test_issue72_repr_bug_fix_kg_mg_per_kg(monkeypatch):
     """
     REGRESSION TEST for the "µkg" bug.
@@ -460,7 +460,7 @@ def test_issue72_repr_bug_fix_kg_mg_per_kg(monkeypatch):
     assert required_dose_rev.unit.name == "kg"
     assert isclose(required_dose_rev.unit.scale_to_si, 1)
 
-@pytest.mark.regression(reason="Issue #72: Quantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
+@pytest.mark.regression(reason="Issue #72: LinearQuantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
 def test_issue72_repr_cancellation_to_prefixed_si(monkeypatch):
     """
     Tests that cancellation still allows a *correct* upgrade when
@@ -481,7 +481,7 @@ def test_issue72_repr_cancellation_to_prefixed_si(monkeypatch):
     
     
 
-@pytest.mark.regression(reason="Issue #72: Quantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
+@pytest.mark.regression(reason="Issue #72: LinearQuantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
 def test_issue72_repr_cancellation_to_dimensionless(monkeypatch):
     """
     Tests that 'mg/kg' simplifies to a dimensionless number.
@@ -504,7 +504,7 @@ def test_issue72_repr_cancellation_to_dimensionless(monkeypatch):
     assert isclose(q_equal.value, 1)
     assert f"{q_equal}" == "1"
 
-@pytest.mark.regression(reason="Issue #72: Quantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
+@pytest.mark.regression(reason="Issue #72: LinearQuantity.__repr__ incorrectly upgrades a cancelled unit to a prefixed SI unit (e.g., mg becomes µkg)")
 def test_issue72_repr_cancellation_to_si_symbol(monkeypatch):
     """
     Tests that 'mJ/ms' simplifies to 'W'.
@@ -676,13 +676,13 @@ def test_repr_regression_fix_format_si_works(monkeypatch):
     p = 2 * kPa   # 2000 Pa
     q = 3 * uF    # 3e-6 F
 
-    # p.to_si() creates a Quantity(2000, unit=Pa).
-    # The fix ensures repr(Quantity(2000, unit=Pa)) is "2000 Pa",
+    # p.to_si() creates a LinearQuantity(2000, unit=Pa).
+    # The fix ensures repr(LinearQuantity(2000, unit=Pa)) is "2000 Pa",
     # not "2 kPa".
     assert f"{p:si}" == "2000 Pa"
 
-    # q.to_si() creates Quantity(3e-6, unit=F).
-    # The fix ensures repr(Quantity(3e-6, unit=F)) is "3e-06 F",
+    # q.to_si() creates LinearQuantity(3e-6, unit=F).
+    # The fix ensures repr(LinearQuantity(3e-6, unit=F)) is "3e-06 F",
     # not "3 µF".
     assert f"{q:si}" == "3e-06 F"
 

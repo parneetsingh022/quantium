@@ -23,17 +23,54 @@ The system supports:
 from __future__ import annotations
 
 from math import isclose
-from typing import Union
+from typing import Protocol, runtime_checkable, Union
+from fractions import Fraction
 
 from quantium.core.dimensions import DIM_0, Dim, dim_div, dim_mul, dim_pow
-from quantium.core.unit import UNIT_SIMPLIFIER, LinearUnit
+from quantium.core.unit import UNIT_SIMPLIFIER, LinearUnit, Unit
 from quantium.io.unit_simplifier import SymbolComponents
 from quantium.units.parser import extract_unit_expr
 
+
 Number = Union[int, float]
 
+@runtime_checkable
+class Quantity(Protocol):
+    """Interface for quantities (linear today; affine later)."""
 
-class Quantity:
+    # required attributes (so runtime isinstance(…, Quantity) works)
+    _mag_si: float         # SI magnitude
+    dim: Dim               # physical dimension
+    unit: Unit             # display unit 
+
+    # conversions
+    def to(self, new_unit: LinearUnit | str) -> "Quantity": ...
+    def to_si(self) -> "Quantity": ...
+    @property
+    def si(self) -> "Quantity": ...
+    @property
+    def value(self) -> float: ...
+    def as_key(self, precision: int = 12) -> tuple: ...
+
+    # arithmetic
+    def __add__(self, other: "Quantity") -> "Quantity": ...
+    def __sub__(self, other: "Quantity") -> "Quantity": ...
+    def __mul__(self, other: "Quantity | LinearUnit | Number") -> "Quantity": ...
+    def __rmul__(self, other: Number) -> "Quantity": ...
+    def __truediv__(self, other: "Quantity | LinearUnit | Number") -> "Quantity": ...
+    def __rtruediv__(self, other: Number) -> "Quantity": ...
+    def __pow__(self, n: int | Fraction) -> "Quantity": ...
+
+    # comparisons
+    def __eq__(self, other: object) -> bool: ...
+    def __ne__(self, other: object) -> bool: ...
+    def __lt__(self, other: object) -> bool: ...
+    def __le__(self, other: object) -> bool: ...
+    def __gt__(self, other: object) -> bool: ...
+    def __ge__(self, other: object) -> bool: ...
+
+
+class LinearQuantity(Quantity):
     """
     Represents a physical quantity with magnitude, dimension, and unit, supporting
     arithmetic operations and unit conversions while maintaining dimensional consistency.
@@ -60,13 +97,13 @@ class Quantity:
         
     def _check_dim_compatible(self, other: object) -> None:
         """Internal helper to raise TypeError on dimension mismatch."""
-        if not isinstance(other, Quantity):
+        if not isinstance(other, LinearQuantity):
             # Allow comparison with 0 (dimensionless)
             if isinstance(other, (int, float)) and other == 0:
                 if self.dim != DIM_0:
                     raise TypeError("Cannot compare a dimensioned quantity to 0")
                 return  # It's a 0 dimensionless quantity, OK
-            raise TypeError(f"Cannot compare Quantity with type {type(other)}")
+            raise TypeError(f"Cannot compare LinearQuantity with type {type(other)}")
 
         if self.dim != other.dim:
             raise TypeError(
@@ -79,7 +116,7 @@ class Quantity:
         return isclose(self._mag_si, other_si_mag, rel_tol=1e-12, abs_tol=0.0)
     
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Quantity):
+        if not isinstance(other, LinearQuantity):
             return NotImplemented
         # Same physical dimension; SI magnitudes equal within tolerance.
         return (
@@ -87,7 +124,7 @@ class Quantity:
             and isclose(self._mag_si, other._mag_si, rel_tol=1e-12, abs_tol=0.0)
         )
     def __ne__(self, other: object) -> bool:
-        if not isinstance(other, Quantity):
+        if not isinstance(other, LinearQuantity):
             return NotImplemented
         if self.dim != other.dim:
             return True # Not equal if dims don't match
@@ -165,7 +202,7 @@ class Quantity:
             
         return (self.dim, rounded_mag_si)
 
-    def to(self, new_unit: "LinearUnit|str") -> Quantity:
+    def to(self, new_unit: "LinearUnit|str") -> LinearQuantity:
         if(isinstance(new_unit, str)):
             from quantium.units.registry import DEFAULT_REGISTRY
             new_unit = extract_unit_expr(new_unit, DEFAULT_REGISTRY)
@@ -194,7 +231,7 @@ class Quantity:
             components,
             new_unit,
         )
-        return Quantity(value, unit)
+        return LinearQuantity(value, unit)
         
     
     def to_si(self) -> Quantity:
@@ -222,18 +259,18 @@ class Quantity:
         for head in si_heads:
             if cur_name == head or cur_name.endswith(head):
                 si_unit = LinearUnit(head, 1.0, self.dim)
-                return Quantity(self._mag_si, si_unit)  # already SI magnitude
+                return LinearQuantity(self._mag_si, si_unit)  # already SI magnitude
 
         # --- (2) Fall back to the global preferred symbol for this dimension ---
         sym = preferred_symbol_for_dim(self.dim)  # e.g., "A", "N", "W", "Pa", "Hz", …
         if sym:
             si_unit = LinearUnit(sym, 1.0, self.dim)
-            return Quantity(self._mag_si, si_unit)
+            return LinearQuantity(self._mag_si, si_unit)
 
         # --- (3) Compose from base SI if no named symbol exists ---
         si_name = format_dim(self.dim)  # e.g., "kg·m/s²", "1/s", "m"
         si_unit = LinearUnit(si_name, 1.0, self.dim)
-        return Quantity(self._mag_si, si_unit)
+        return LinearQuantity(self._mag_si, si_unit)
 
     @property
     def si(self) -> Quantity:
@@ -249,19 +286,19 @@ class Quantity:
             raise TypeError("Add requires same dimensions")
         # return in left operand's unit
         sum_si = self._mag_si + other._mag_si
-        return Quantity(self.unit.from_base_abs(sum_si), self.unit)
+        return LinearQuantity(self.unit.from_base_abs(sum_si), self.unit)
     
     def __sub__(self, other: Quantity) -> Quantity:
         if self.dim != other.dim:
             raise TypeError("Sub requires same dimensions")
         diff_si = self._mag_si - other._mag_si
-        return Quantity(self.unit.from_base_abs(diff_si), self.unit)
+        return LinearQuantity(self.unit.from_base_abs(diff_si), self.unit)
     
     def __mul__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
         # scalar × quantity
         if isinstance(other, (int, float)):
             new_si = self._mag_si * float(other)
-            return Quantity(self.unit.from_base_abs(new_si), self.unit)
+            return LinearQuantity(self.unit.from_base_abs(new_si), self.unit)
 
         # quantity × unit
         if isinstance(other, LinearUnit):
@@ -277,17 +314,17 @@ class Quantity:
 
             
             value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-            return Quantity(value, unit)
+            return LinearQuantity(value, unit)
         
         # quantity × quantity
         result_mag_si = self._mag_si * other._mag_si
         result_dim = dim_mul(self.dim, other.dim)
         components = UNIT_SIMPLIFIER.combine_symbol_maps(
             self._symbol_component_map(0),
-            other._symbol_component_map(1),
+            UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
         )
         value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return Quantity(value, unit)
+        return LinearQuantity(value, unit)
 
     def __rmul__(self, other: float | int) -> "Quantity":
         # allows 3 * (2 m) -> 6 m
@@ -297,7 +334,7 @@ class Quantity:
         # quantity / scalar
         if isinstance(other, (int, float)):
             new_si = self._mag_si / float(other)
-            return Quantity(self.unit.from_base_abs(new_si), self.unit)
+            return LinearQuantity(self.unit.from_base_abs(new_si), self.unit)
         
         # quantity / unit
         if isinstance(other, LinearUnit):
@@ -308,17 +345,19 @@ class Quantity:
                 UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(other, 1), -1),
             )
             value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-            return Quantity(value, unit)
+            return LinearQuantity(value, unit)
 
         # quantity / quantity
         result_mag_si = self._mag_si / other._mag_si
         result_dim = dim_div(self.dim, other.dim)
         components = UNIT_SIMPLIFIER.combine_symbol_maps(
             self._symbol_component_map(0),
-            UNIT_SIMPLIFIER.scale_symbol_map(other._symbol_component_map(1), -1),
+            UNIT_SIMPLIFIER.scale_symbol_map(
+                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1), -1
+            ),
         )
         value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return Quantity(value, unit)
+        return LinearQuantity(value, unit)
 
     def __rtruediv__(self, other: float | int) -> "Quantity":
         # scalar / quantity  -> returns Quantity with inverse dimension
@@ -328,11 +367,11 @@ class Quantity:
         result_mag_si = float(other) / self._mag_si
         components = UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1)
         value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return Quantity(value, unit)
+        return LinearQuantity(value, unit)
 
-    def __pow__(self, n: int) -> "Quantity":
+    def __pow__(self, n: int | Fraction) -> "Quantity":
         new_unit = self.unit ** n
-        return Quantity(new_unit.from_base_abs(self._mag_si ** n), new_unit)
+        return LinearQuantity(new_unit.from_base_abs(self._mag_si ** n), new_unit)
     
     def __repr__(self) -> str:
         # Local imports avoid cyclic imports; modules are cached after the first time.

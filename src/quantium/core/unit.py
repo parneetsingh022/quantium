@@ -10,7 +10,7 @@ from quantium.core.utils import rationalize
 from quantium.io.unit_simplifier import UnitNameSimplifier
 
 if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
-    from quantium.core.quantity import Quantity
+    from quantium.core.quantity import LinearQuantity
 
 
 @runtime_checkable
@@ -91,16 +91,16 @@ class LinearUnit(Unit):
             and isclose(self.scale_to_si, other.scale_to_si, rel_tol=1e-12, abs_tol=0.0)
         )
 
-    def __rmul__(self, value: float) -> "Quantity":
-        from quantium.core.quantity import Quantity
+    def __rmul__(self, value: float) -> "LinearQuantity":
+        from quantium.core.quantity import LinearQuantity
 
         scalar = float(value)
         if scalar == 0.0:
             mag_si = 0.0
             components = UNIT_SIMPLIFIER.unit_symbol_map(self)
             val, unit = UNIT_SIMPLIFIER.si_to_value_unit(mag_si, self.dim, components)
-            return Quantity(val, unit)
-        return Quantity(scalar, self)
+            return LinearQuantity(val, unit)
+        return LinearQuantity(scalar, self)
 
     def __mul__(self, other: "LinearUnit") -> "LinearUnit":
         new_dim = dim_mul(self.dim, other.dim)

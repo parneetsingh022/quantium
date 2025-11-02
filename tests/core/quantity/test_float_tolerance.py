@@ -21,7 +21,7 @@ def test_unit_equality_tolerates_scale_float_drift():
     assert u1 == u2, f"scales differ slightly: {u1.scale_to_si} vs {u2.scale_to_si}"
 
 
-@pytest.mark.regression(reason="Float drift: Quantity equality should use tolerant SI magnitude comparison")
+@pytest.mark.regression(reason="Float drift: LinearQuantity equality should use tolerant SI magnitude comparison")
 def test_quantity_equality_tolerates_si_float_drift():
     m = LinearUnit("m", 1.0, LENGTH)
     a = LinearUnit("a", 0.1, LENGTH)

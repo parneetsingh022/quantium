@@ -1,7 +1,7 @@
 import pytest
 
 from quantium.core.dimensions import DIM_0
-from quantium.core.quantity import Quantity
+from quantium.core.quantity import LinearQuantity
 from quantium.units.registry import DEFAULT_REGISTRY as ureg
 
 
@@ -9,14 +9,14 @@ from quantium.units.registry import DEFAULT_REGISTRY as ureg
 def test_all_units_self_division_is_dimensionless_and_nameless():
     """
     For every registered unit:
-      - Create a Quantity with magnitude 1 and that unit
+      - Create a LinearQuantity with magnitude 1 and that unit
       - Divide it by itself
       - Ensure the resulting dimension == DIM_0 (dimensionless)
       - Ensure the resulting unit name is "" (empty string)
       - Ensure __repr__ returns only the numeric value (no unit symbol)
     """
     for name, unit in ureg.all().items():
-        q = Quantity(1.0, unit)
+        q = LinearQuantity(1.0, unit)
         result = q / q
 
         # Check dimensionless

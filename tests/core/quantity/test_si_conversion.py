@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError
 import math
 
 from quantium.core.dimensions import LENGTH, TEMPERATURE, TIME, dim_div
-from quantium.core.quantity import Quantity
+from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as ureg
 
@@ -25,7 +25,7 @@ def test_to_si_uses_preferred_symbol_when_available(monkeypatch):
     cm = LinearUnit("cm", 0.01, LENGTH)
     q_si = (123 * cm).to_si()
 
-    assert isinstance(q_si, Quantity)
+    assert isinstance(q_si, LinearQuantity)
     assert q_si.unit.name == "m"         # preferred symbol chosen
     assert q_si.unit.scale_to_si == 1.0  # SI unit
     # magnitudes in SI should match _mag_si:
@@ -84,7 +84,7 @@ def test_si_uses_preferred_symbol_when_available(monkeypatch):
     cm = ureg.get("cm")
     q_si = (123 * cm).si  # 1.23 m
 
-    assert isinstance(q_si, Quantity)
+    assert isinstance(q_si, LinearQuantity)
     assert q_si.unit.name == "m"         # preferred symbol chosen
     assert q_si.unit.scale_to_si == 1.0  # SI unit
     assert math.isclose(q_si._mag_si, 1.23)

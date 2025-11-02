@@ -19,7 +19,7 @@ from quantium.core.utils import _tokenize_name_merge
 from quantium.units.prefixes import Prefix
 
 if TYPE_CHECKING:  # pragma: no cover - import only used for typing
-    from quantium.core.unit import LinearUnit
+    from quantium.core.unit import LinearUnit, Unit
 
 SymbolComponents = Dict[str, Tuple[Fraction, Tuple[int, int]]]
 
@@ -112,7 +112,7 @@ class UnitNameSimplifier:
     # ------------------------------------------------------------------
     # Symbol component utilities
     # ------------------------------------------------------------------
-    def unit_symbol_map(self, unit: "LinearUnit", priority: int = 0) -> SymbolComponents:
+    def unit_symbol_map(self, unit: "Unit", priority: int = 0) -> SymbolComponents:
         """
         Create a mapping from unit symbols to their exponents and metadata.
 

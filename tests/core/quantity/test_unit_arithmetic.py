@@ -146,13 +146,13 @@ def test_unit_reciprocal_with_rtruediv_normalizes_power():
     
 
 # -------------------------------
-# Smoke: rmatmul creates a Quantity with the right unit
+# Smoke: rmatmul creates a LinearQuantity with the right unit
 # -------------------------------
 
 def test_unit_rmatmul_creates_quantity_with_unit():
     m = LinearUnit("m", 1.0, LENGTH)
     q = 5 * m
-    from quantium.core.quantity import Quantity
-    assert isinstance(q, Quantity)
+    from quantium.core.quantity import LinearQuantity
+    assert isinstance(q, LinearQuantity)
     assert q.unit is m
     assert math.isclose(q._mag_si, 5.0)

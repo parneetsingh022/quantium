@@ -1,22 +1,22 @@
 import math
 import pytest
 from quantium.core.dimensions import LENGTH, TEMPERATURE,TIME, DIM_0
-from quantium.core.quantity import Quantity
+from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as dreg
 from quantium.units import u
 # -------------------------------
-# Quantity: basics & conversion
+# LinearQuantity: basics & conversion
 # -------------------------------
 
 def test_quantity_construct_and_to():
     m  = LinearUnit("m", 1.0, LENGTH)
     cm = LinearUnit("cm", 0.01, LENGTH)
 
-    q_cm = Quantity(200, cm)          # 200 cm
+    q_cm = LinearQuantity(200, cm)          # 200 cm
     q_m  = q_cm.to(m)                  # -> 2 m
 
-    assert isinstance(q_m, Quantity)
+    assert isinstance(q_m, LinearQuantity)
     assert q_m.unit == m
     assert q_m.dim == LENGTH
     # _mag_si is internal, so check using units:
@@ -27,7 +27,7 @@ def test_quantity_construct_and_to():
 def test_quantity_to_dimension_mismatch_raises():
     m = LinearUnit("m", 1.0, LENGTH)
     s = LinearUnit("s", 1.0, TEMPERATURE)
-    q = Quantity(3, m)
+    q = LinearQuantity(3, m)
     with pytest.raises(TypeError):
         q.to(s)
 
@@ -39,7 +39,7 @@ def test_quantity_to_dimension_mismatch_raises():
 def test_rmatmul_operator():
     m = LinearUnit("m", 1.0, LENGTH)
     q = 3 * m
-    assert isinstance(q, Quantity)
+    assert isinstance(q, LinearQuantity)
     assert q.dim == LENGTH
     assert q.unit is m
     assert math.isclose(q._mag_si, 3.0)
@@ -49,7 +49,7 @@ def test_rmatmul_operator():
 # ----------------------------
 # Helpers
 # ----------------------------
-def shown(q: Quantity) -> float:
+def shown(q: LinearQuantity) -> float:
     """Return the magnitude shown in q's current unit (not SI)."""
     return q._mag_si / q.unit.scale_to_si
 
@@ -115,7 +115,7 @@ def test_to_string_parentheses_and_mixed_ops():
 
 def test_to_string_with_micro_alias_in_denominator():
     # 1 / ms -> 1000 1/s (Hz dimension), using 'ms' in target string
-    q = 1 * (1 / dreg.get("ms"))  # Quantity with T^-1
+    q = 1 * (1 / dreg.get("ms"))  # LinearQuantity with T^-1
     out = q.to("1/s")
     assert math.isclose(shown(out), 1000.0)
     assert out.dim == q.dim
@@ -139,7 +139,7 @@ def test_to_physically_equivalent_different_name():
     Tests the bug fix: converting to a unit that is physically
     identical but has a different name should return a NEW object.
     """
-    q1 = Quantity(5.0, u.W/(u.A*u.m))  # 5.0 W/(A·m)
+    q1 = LinearQuantity(5.0, u.W/(u.A*u.m))  # 5.0 W/(A·m)
 
     # Test conversion using a LinearUnit object
     q2 = q1.to(u.V/u.m)            # Convert to V/m
@@ -169,7 +169,7 @@ def test_to_identical_name_optimization():
     Tests the optimization path: converting to the *exact same unit*
     (identical name) should return the SAME object (`self`).
     """
-    q1 = Quantity(10.0, u.V/u.m)  # 10.0 V/m
+    q1 = LinearQuantity(10.0, u.V/u.m)  # 10.0 V/m
 
     # Test conversion using the *same* LinearUnit object
     q2 = q1.to(u.V/u.m)
@@ -190,7 +190,7 @@ def test_to_identical_name_optimization():
 # ----------------------------
 
 def test_to_string_identity_fast_path_returns_same_object():
-    # .to("m") on a Quantity already in meters should return self
+    # .to("m") on a LinearQuantity already in meters should return self
     q = 2.5 * dreg.get("m")
     r = q.to("m")
     assert r is q
@@ -261,7 +261,7 @@ def test_quantity_value_property():
     q_cm = 200 * u.cm
     assert math.isclose(q_cm.value, 200.0)
 
-    # 3. Quantity after conversion
+    # 3. LinearQuantity after conversion
     # 200 cm -> 2 m
     q_m_converted = q_cm.to(u.m)
     assert math.isclose(q_m_converted.value, 2.0)

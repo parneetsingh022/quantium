@@ -11,7 +11,7 @@ from quantium.units.registry import UnitsRegistry, DEFAULT_REGISTRY
 from quantium.core.dimensions import (
     LENGTH, TIME, MASS, CURRENT, DIM_0, dim_div, dim_mul, dim_pow
 )
-from quantium.core.quantity import Quantity
+from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 
 
@@ -179,7 +179,7 @@ def test_quantity_and_unit_roundtrip_repr_and_conversion():
     # 1000 cm/s should print as "1000 cm/s" by default, and "10 m/s" in SI
     cm = LinearUnit("cm", 0.01, LENGTH)
     s = DEFAULT_REGISTRY.get("s")
-    v = Quantity(1000, cm / s)
+    v = LinearQuantity(1000, cm / s)
     assert f"{v}" == "1000 cm/s"
     assert f"{v:si}" == "10 m/s"
 

@@ -55,10 +55,10 @@ def test_unit_pow_negative_high_exponents_regression_issue_33(sym: str, scale: f
 
 
 # -------------------------
-# Regression: Issue #33 (Quantity)
+# Regression: Issue #33 (LinearQuantity)
 # -------------------------
 
-@pytest.mark.regression(reason="Issue #33: Quantity ** n must match dim, unit, and magnitude for negative exponents")
+@pytest.mark.regression(reason="Issue #33: LinearQuantity ** n must match dim, unit, and magnitude for negative exponents")
 @pytest.mark.parametrize("n", [-3, -4])
 @pytest.mark.parametrize("sym, scale, value", [
     ("m",  1.0,  2.0),
