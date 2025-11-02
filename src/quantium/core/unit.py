@@ -13,9 +13,6 @@ if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
     from quantium.core.quantity import Quantity
 
 
-
-
-
 @runtime_checkable
 class Unit(Protocol):
     name: str
@@ -29,7 +26,7 @@ class Unit(Protocol):
     @property
     def is_delta(self) -> bool: ...
 
-    # Absolute conversions (apply offset if present)
+    # # Absolute conversions (apply offset if present)
     def to_base_abs(self, x: float) -> float: ...
     def from_base_abs(self, x: float) -> float: ...
 
@@ -53,6 +50,24 @@ class LinearUnit(Unit):
             raise ValueError("dim must be a 7-tuple (L,M,T,I,Θ,N,J)")
         if not (self.scale_to_si > 0 and isfinite(self.scale_to_si)):
             raise ValueError("scale_to_si must be a positive, finite number")
+        
+    def to_base_abs(self, x: float) -> float:
+        """Convert an absolute value in this unit to the SI base unit."""
+        return x * self.scale_to_si
+
+    def from_base_abs(self, x: float) -> float:
+        """Convert an absolute value from the SI base unit to this unit."""
+        return x / self.scale_to_si
+
+    def to_base_delta(self, dx: float) -> float:
+        """Convert a difference (delta) in this unit to the SI base unit."""
+        return dx * self.scale_to_si
+
+    def from_base_delta(self, dx: float) -> float:
+        """Convert a difference (delta) from the SI base unit to this unit."""
+        return dx / self.scale_to_si
+
+
     
     @classmethod
     def delta(cls, name: str, scale_to_si: float, dim: Dim) -> LinearUnit:
@@ -62,6 +77,10 @@ class LinearUnit(Unit):
     @property
     def is_linear(self) -> bool:
         return True
+    
+    @property
+    def is_delta(self) -> bool:
+        return self._is_delta
     
 
     def __eq__(self, other: object) -> bool:

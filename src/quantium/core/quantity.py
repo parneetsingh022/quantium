@@ -51,7 +51,7 @@ class Quantity:
 
 
     def __init__(self, value : float, unit : LinearUnit):
-        self._mag_si = float(value) * unit.scale_to_si
+        self._mag_si = unit.to_base_abs(float(value))
         self.dim = unit.dim
         self.unit = unit
 
@@ -241,24 +241,27 @@ class Quantity:
     
     @property
     def value(self) -> float:
-        return self._mag_si / self.unit.scale_to_si
+        return self.unit.from_base_abs(self._mag_si)
 
     # arithmetic
     def __add__(self, other: Quantity) -> Quantity:
         if self.dim != other.dim:
             raise TypeError("Add requires same dimensions")
         # return in left operand's unit
-        return Quantity((self._mag_si + other._mag_si)/self.unit.scale_to_si, self.unit)
+        sum_si = self._mag_si + other._mag_si
+        return Quantity(self.unit.from_base_abs(sum_si), self.unit)
     
     def __sub__(self, other: Quantity) -> Quantity:
         if self.dim != other.dim:
             raise TypeError("Sub requires same dimensions")
-        return Quantity((self._mag_si - other._mag_si)/self.unit.scale_to_si, self.unit)
+        diff_si = self._mag_si - other._mag_si
+        return Quantity(self.unit.from_base_abs(diff_si), self.unit)
     
     def __mul__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
         # scalar × quantity
         if isinstance(other, (int, float)):
-            return Quantity((self._mag_si * float(other)) / self.unit.scale_to_si, self.unit)
+            new_si = self._mag_si * float(other)
+            return Quantity(self.unit.from_base_abs(new_si), self.unit)
 
         # quantity × unit
         if isinstance(other, LinearUnit):
@@ -293,7 +296,8 @@ class Quantity:
     def __truediv__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
         # quantity / scalar
         if isinstance(other, (int, float)):
-            return Quantity((self._mag_si / float(other)) / self.unit.scale_to_si, self.unit)
+            new_si = self._mag_si / float(other)
+            return Quantity(self.unit.from_base_abs(new_si), self.unit)
         
         # quantity / unit
         if isinstance(other, LinearUnit):
@@ -328,7 +332,7 @@ class Quantity:
 
     def __pow__(self, n: int) -> "Quantity":
         new_unit = self.unit ** n
-        return Quantity((self._mag_si ** n) / new_unit.scale_to_si, new_unit)
+        return Quantity(new_unit.from_base_abs(self._mag_si ** n), new_unit)
     
     def __repr__(self) -> str:
         # Local imports avoid cyclic imports; modules are cached after the first time.
