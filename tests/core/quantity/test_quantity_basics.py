@@ -1,6 +1,7 @@
 import math
 import pytest
-from quantium.core.dimensions import LENGTH, TEMPERATURE,TIME, DIM_0
+from quantium.core.dimensions import LENGTH, TIME, DIM_0
+from quantium.units.parser import extract_unit_expr
 from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as dreg
@@ -26,7 +27,7 @@ def test_quantity_construct_and_to():
 
 def test_quantity_to_dimension_mismatch_raises():
     m = LinearUnit("m", 1.0, LENGTH)
-    s = LinearUnit("s", 1.0, TEMPERATURE)
+    s = LinearUnit("s", 1.0, TIME)
     q = LinearQuantity(3, m)
     with pytest.raises(TypeError):
         q.to(s)
@@ -291,3 +292,23 @@ def test_quantity_value_property():
     # correctly returns NotImplemented.
     with pytest.raises(TypeError, match="unsupported operand type"):
         _ = 1 + LENGTH
+
+
+# defensive guard when parser doesn't return a LinearUnit ---
+def test_to_parser_returns_non_linearunit_triggers_guard(monkeypatch):
+    """
+    If the unit parser returns something that is NOT a LinearUnit
+    (e.g., future AffineUnit or a bug), .to(...) should raise the
+    defensive TypeError.
+    """
+    import quantium.core.quantity as qmod  # module under test
+
+    class NotAUnit:
+        pass
+
+    # Patch the *bound* name used by LinearQuantity.to(...)
+    monkeypatch.setattr(qmod, "extract_unit_expr", lambda s, reg: NotAUnit())
+
+    q = 1 * dreg.get("m")
+    with pytest.raises(TypeError, match="did not resolve to a LinearUnit"):
+        _ = q.to("anything")  # string won’t be parsed; our patch returns NotAUnit
