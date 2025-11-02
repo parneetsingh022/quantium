@@ -1,7 +1,9 @@
 import math
 import pytest
+import operator
+
+
 from quantium.core.dimensions import LENGTH, TIME, DIM_0
-from quantium.units.parser import extract_unit_expr
 from quantium.core.quantity import LinearQuantity
 from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as dreg
@@ -312,3 +314,37 @@ def test_to_parser_returns_non_linearunit_triggers_guard(monkeypatch):
     q = 1 * dreg.get("m")
     with pytest.raises(TypeError, match="did not resolve to a LinearUnit"):
         _ = q.to("anything")  # string won’t be parsed; our patch returns NotAUnit
+
+
+# ----------------------------
+# _check_dim_compatible(): compare to 0
+# ----------------------------
+
+def test_compare_dimensioned_quantity_to_zero_raises_typeerror():
+    q = 3 * u.m  # dimensioned
+    for op in (operator.lt, operator.le, operator.gt, operator.ge):
+        with pytest.raises(TypeError, match="Cannot compare a dimensioned quantity to 0"):
+            _ = op(q, 0)  # q < 0, q <= 0, q > 0, q >= 0
+
+def test_compare_dimensionless_quantity_to_zero_is_allowed():
+    q = (10 * u.s) / (5 * u.s)  # dimensionless (== 2)
+    assert q.dim == DIM_0
+
+    # Should NOT raise; comparisons should behave numerically vs 0
+    assert (q > 0) is True
+    assert (q >= 0) is True
+    assert (q < 0) is False
+    assert (q <= 0) is False
+
+# ----------------------------
+# _check_dim_compatible(): wrong-type operand
+# ----------------------------
+
+def test_compare_with_non_quantity_non_number_raises_typeerror():
+    q = 1 * u.m
+    # Use a comparison that triggers _check_dim_compatible (not __eq__)
+    with pytest.raises(TypeError) as excinfo:
+        _ = q < "oops"
+    # Message should include the offending type
+    assert "Cannot compare LinearQuantity with type" in str(excinfo.value)
+    assert "str" in str(excinfo.value)
