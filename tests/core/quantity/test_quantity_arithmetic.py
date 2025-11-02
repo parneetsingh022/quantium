@@ -31,6 +31,12 @@ def test_add_dim_mismatch_raises():
     with pytest.raises(TypeError):
         _ = (1 * m) + (1 * s)
 
+def test_sub_dim_mismatch_raises():
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
+    with pytest.raises(TypeError):
+        _ = (1 * m) - (1 * s)
+
 def test_scalar_multiplication_and_division():
     m = LinearUnit("m", 1.0, LENGTH)
     q = 2 * m
