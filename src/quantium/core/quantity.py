@@ -27,7 +27,7 @@ from typing import Protocol, runtime_checkable, Union
 from fractions import Fraction
 
 from quantium.core.dimensions import DIM_0, Dim, dim_div, dim_mul, dim_pow
-from quantium.core.unit import UNIT_SIMPLIFIER, LinearUnit, Unit
+from quantium.core.unit import UNIT_SIMPLIFIER, Unit, LinearUnit, AffineUnit
 from quantium.io.unit_simplifier import SymbolComponents
 from quantium.units.parser import extract_unit_expr
 
@@ -252,7 +252,7 @@ class LinearQuantity(Quantity):
         # --- (1) Preserve the "family" if we can (Hz vs Bq, Gy vs Sv, …) ---
         # Grab all atomic SI heads (scale==1, same dim) registered in the system.
         si_heads = [name for name, u in _ureg.all().items()
-                    if u.scale_to_si == 1.0 and u.dim == self.dim and not u.is_delta]
+                    if u.scale_to_si == 1.0 and u.dim == self.dim and u.is_si]
 
         # If our current unit is exactly one of those heads (e.g., "Bq"), or is a prefixed
         # form ending with the head (e.g., "kBq"), keep that head as the SI symbol.
@@ -282,15 +282,25 @@ class LinearQuantity(Quantity):
 
     # arithmetic
     def __add__(self, other: Quantity) -> Quantity:
+        if isinstance(other, AffineQuantity):
+            return other.__radd__(self)
+        
+        
         if self.dim != other.dim:
             raise TypeError("Add requires same dimensions")
+        
         # return in left operand's unit
         sum_si = self._mag_si + other._mag_si
         return LinearQuantity(self.unit.from_base_abs(sum_si), self.unit)
     
     def __sub__(self, other: Quantity) -> Quantity:
+        if isinstance(other, AffineQuantity):
+            raise TypeError("Subtracting an absolute affine quantity from a delta is undefined.")
+        
         if self.dim != other.dim:
             raise TypeError("Sub requires same dimensions")
+        
+        
         diff_si = self._mag_si - other._mag_si
         return LinearQuantity(self.unit.from_base_abs(diff_si), self.unit)
     
@@ -316,6 +326,13 @@ class LinearQuantity(Quantity):
             value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
             return LinearQuantity(value, unit)
         
+        if not isinstance(other, LinearQuantity):
+            raise TypeError(
+                "Multiplication with absolute affine quantities is undefined; "
+                "use delta (linear) quantities instead."
+            )
+        
+
         # quantity × quantity
         result_mag_si = self._mag_si * other._mag_si
         result_dim = dim_mul(self.dim, other.dim)
@@ -346,6 +363,12 @@ class LinearQuantity(Quantity):
             )
             value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
             return LinearQuantity(value, unit)
+        
+        if not isinstance(other, LinearQuantity):
+            raise TypeError(
+                "Division with absolute affine quantities is undefined; "
+                "use delta (linear) quantities instead."
+            )
 
         # quantity / quantity
         result_mag_si = self._mag_si / other._mag_si
@@ -444,4 +467,217 @@ class LinearQuantity(Quantity):
             return repr(self)          # current native (default)
         if spec == "si":
             return repr(self.to_si())  # force SI
+        raise ValueError("Unknown format spec; use '', 'native', or 'si'")
+
+
+class AffineQuantity:
+    """
+    Absolute quantity expressed in an AffineUnit (e.g., °C).  Internally stores
+    absolute SI magnitude via the unit's *absolute* conversion.
+
+    Arithmetic semantics (temperature-like, safe-by-default):
+      • Affine - Affine -> LinearQuantity (delta; uses unit.delta_unit)
+      • Affine + LinearQuantity (delta) -> AffineQuantity
+      • Affine - LinearQuantity (delta) -> AffineQuantity
+      • Disallow Affine + Affine (meaningless), and any * or / beyond dimensionless scalars.
+      • Disallow scalar scaling of affine absolutes (2 * 20°C) as meaningless.
+
+    Conversions:
+      • .to(affine_unit | "symbol")  -> AffineQuantity in that unit
+      • .to_si() uses an affine unit with scale=1, offset=0 and same delta_unit.
+    """
+
+    __slots__ = ["_mag_si", "dim", "unit"]
+
+    _mag_si: float
+    dim: Dim
+    unit: "AffineUnit"
+
+    def __init__(self, value: float, unit: "AffineUnit"):
+        self._mag_si = unit.to_base_abs(float(value))
+        self.dim = unit.dim
+        self.unit = unit
+
+    # --- conversions ---
+
+    def to(self, new_unit: "AffineUnit | str") -> "AffineQuantity":
+        # allow strings if your registry/parser returns AffineUnit
+        if isinstance(new_unit, str):
+            from quantium.units.registry import DEFAULT_REGISTRY
+            from quantium.units.parser import extract_unit_expr
+            new_unit = extract_unit_expr(new_unit, DEFAULT_REGISTRY)
+
+        from quantium.core.unit import AffineUnit  # local to avoid cycles
+        if not isinstance(new_unit, AffineUnit):
+            raise TypeError("AffineQuantity.to() requires an AffineUnit (absolute unit with offset).")
+
+        if new_unit.dim != self.dim:
+            raise TypeError("Dimension mismatch in conversion")
+
+        if new_unit.name == self.unit.name:
+            return self
+
+        value = new_unit.from_base_abs(self._mag_si)
+        return AffineQuantity(value, new_unit)
+
+    def to_si(self) -> "AffineQuantity":
+        """
+        Return an equivalent AffineQuantity expressed in an SI-style affine unit:
+        scale=1, offset=0, name = preferred symbol for the dimension (if any).
+        Uses the *same delta_unit* as the current affine unit.
+        """
+        from quantium.core.utils import preferred_symbol_for_dim
+
+        sym = preferred_symbol_for_dim(self.dim) or ""  # e.g., "K" for temperature
+        from quantium.core.unit import AffineUnit  # local import to avoid cycles
+        si_affine = AffineUnit(name=sym, scale_to_si=1.0, offset_to_si=0.0,
+                               dim=self.dim, delta_unit=self.unit.delta_unit)
+        # already SI magnitude
+        return AffineQuantity(si_affine.from_base_abs(self._mag_si), si_affine)
+
+    @property
+    def si(self) -> "AffineQuantity":
+        return self.to_si()
+
+    @property
+    def value(self) -> float:
+        return self.unit.from_base_abs(self._mag_si)
+
+    def as_key(self, precision: int = 12) -> tuple:
+        rounded_mag_si = round(self._mag_si, precision)
+        if rounded_mag_si == 0.0:
+            rounded_mag_si = 0.0
+        return (self.dim, rounded_mag_si, "affine")
+
+    # --- comparisons ---
+
+    def _check_dim_compatible(self, other: object) -> None:
+        if not isinstance(other, AffineQuantity):
+            raise TypeError(f"Cannot compare AffineQuantity with type {type(other)}")
+        if self.dim != other.dim:
+            raise TypeError(
+                f"Cannot compare quantities with different dimensions: "
+                f"'{self.unit.name}' and '{other.unit.name}'"
+            )
+
+    def _is_close(self, other_si_mag: float) -> bool:
+        return isclose(self._mag_si, other_si_mag, rel_tol=1e-12, abs_tol=0.0)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AffineQuantity):
+            return NotImplemented
+        return self.dim == other.dim and self._is_close(other._mag_si)
+
+    def __ne__(self, other: object) -> bool:
+        if not isinstance(other, AffineQuantity):
+            return NotImplemented
+        if self.dim != other.dim:
+            return True
+        return not self._is_close(other._mag_si)
+
+    def __lt__(self, other: object) -> bool:
+        self._check_dim_compatible(other)
+        return self._mag_si < other._mag_si and not self._is_close(other._mag_si)
+
+    def __le__(self, other: object) -> bool:
+        self._check_dim_compatible(other)
+        return self._mag_si < other._mag_si or self._is_close(other._mag_si)
+
+    def __gt__(self, other: object) -> bool:
+        self._check_dim_compatible(other)
+        return self._mag_si > other._mag_si and not self._is_close(other._mag_si)
+
+    def __ge__(self, other: object) -> bool:
+        self._check_dim_compatible(other)
+        return self._mag_si > other._mag_si or self._is_close(other._mag_si)
+
+    # --- arithmetic ---
+
+    def __add__(self, other: object):
+        # Affine + Linear(delta) -> Affine
+        if isinstance(other, LinearQuantity):
+            if other.dim != self.dim:
+                raise TypeError("Add requires same dimensions")
+            # delta in SI, apply as delta to absolute in SI, then convert back
+            new_si = self._mag_si + other._mag_si  # delta is linear (already SI)
+            return AffineQuantity(self.unit.from_base_abs(new_si), self.unit)
+
+        # Affine + Affine is not meaningful (absolute + absolute)
+        if isinstance(other, AffineQuantity):
+            raise TypeError("Adding two absolute affine quantities is undefined; add a delta instead.")
+
+        return NotImplemented
+
+    def __radd__(self, other: object):
+        # Linear(delta) + Affine -> Affine
+        if isinstance(other, LinearQuantity):
+            return self.__add__(other)
+        return NotImplemented
+
+    def __sub__(self, other: object):
+        # Affine - Linear(delta) -> Affine
+        if isinstance(other, LinearQuantity):
+            if other.dim != self.dim:
+                raise TypeError("Sub requires same dimensions")
+            new_si = self._mag_si - other._mag_si
+            return AffineQuantity(self.unit.from_base_abs(new_si), self.unit)
+
+        # Affine - Affine -> Linear(delta)
+        if isinstance(other, AffineQuantity):
+            if other.dim != self.dim:
+                raise TypeError("Sub requires same dimensions")
+            delta_si = self._mag_si - other._mag_si
+            du = self.unit.delta_unit  # LinearUnit
+            # represent delta in the provided delta_unit
+            value = du.from_base_delta(delta_si)
+            return LinearQuantity(value, du)
+
+        return NotImplemented
+
+    def __rsub__(self, other: object):
+        # Linear(delta) - Affine is meaningless
+        if isinstance(other, LinearQuantity):
+            raise TypeError("Subtracting an absolute affine quantity from a delta is undefined.")
+        return NotImplemented
+
+    def __mul__(self, other: object):
+        # Disallow multiplying affine absolutes by anything other than *dimensionless* scalars.
+        if isinstance(other, (int, float)):
+            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
+        if isinstance(other, (LinearQuantity, AffineQuantity, LinearUnit, Unit)):
+            raise TypeError("Multiplication with absolute affine quantities is undefined.")
+        return NotImplemented
+
+    def __rmul__(self, other: object):
+        if isinstance(other, (int, float)):
+            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
+        return NotImplemented
+
+    def __truediv__(self, other: object):
+        if isinstance(other, (int, float)):
+            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
+        if isinstance(other, (LinearQuantity, AffineQuantity, LinearUnit, Unit)):
+            raise TypeError("Division with absolute affine quantities is undefined.")
+        return NotImplemented
+
+    def __rtruediv__(self, other: object):
+        return NotImplemented
+
+    def __pow__(self, n: int | "Fraction"):
+        raise TypeError("Exponentiation of absolute affine quantities is undefined.")
+
+    # --- representation ---
+
+    def __repr__(self) -> str:
+        # Show numeric magnitude in the *current* affine unit with its name
+        mag = self.unit.from_base_abs(self._mag_si)
+        name = self.unit.name or ""
+        return f"{mag:.15g}" if not name or name == "1" else f"{mag:.15g} {name}"
+
+    def __format__(self, spec: str) -> str:
+        spec = (spec or "").strip().lower()
+        if spec in ("", "native"):
+            return repr(self)
+        if spec == "si":
+            return repr(self.to_si())
         raise ValueError("Unknown format spec; use '', 'native', or 'si'")

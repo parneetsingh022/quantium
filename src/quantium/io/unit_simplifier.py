@@ -19,7 +19,7 @@ from quantium.core.utils import _tokenize_name_merge
 from quantium.units.prefixes import Prefix
 
 if TYPE_CHECKING:  # pragma: no cover - import only used for typing
-    from quantium.core.unit import LinearUnit, Unit
+    from quantium.core.unit import LinearUnit, AffineUnit, Unit
 
 SymbolComponents = Dict[str, Tuple[Fraction, Tuple[int, int]]]
 
@@ -27,6 +27,16 @@ SymbolComponents = Dict[str, Tuple[Fraction, Tuple[int, int]]]
 _POWER_RE = re.compile(r"^(?P<base>.+?)\^(?P<exp>-?\d+)$")
 _MAX_CANON_POWER = 12
 _ALLOWED_CANON_PREFIX_SYMBOLS = frozenset({"G", "M","k", "m", "\u00b5", "n", "p"})
+
+
+def _linearize_for_composition(u):
+    """
+    Ensure only linear (multiplicative) units enter composition:
+    affine units (e.g., K, °C) are replaced by their delta_unit (ΔK, Δ°C).
+    """
+    from quantium.core.unit import AffineUnit
+    return u.delta_unit if isinstance(u, AffineUnit) else u
+
 
 
 def _dim_key(dim: Dim) -> tuple[int, ...]:
@@ -357,6 +367,8 @@ class UnitNameSimplifier:
                 base = DEFAULT_REGISTRY.get(symbol)
             except ValueError:
                 return None
+            
+            base = _linearize_for_composition(base)
 
             abs_exp = abs(exponent)
             unit_part = base if abs_exp == 1 else (base ** abs_exp)
@@ -438,6 +450,7 @@ class UnitNameSimplifier:
                 u = _registry_get(f"{p.symbol}{sym}")
                 if u is None:
                     continue
+                u = _linearize_for_composition(u)
                 u = u if not invert else (u ** -1)
                 cands.append((_value_for(u), u))
             return cands
@@ -491,6 +504,7 @@ class UnitNameSimplifier:
                 if base_sym in comps:  # only if user referenced this symbol
                     base_unit = _registry_get(base_sym)
                     if base_unit is not None:
+                        base_unit = _linearize_for_composition(base_unit)
                         candidate = base_unit ** power
                         return _value_for(candidate), candidate
 
@@ -509,6 +523,8 @@ class UnitNameSimplifier:
         def _single_axis_path(target_exp: int | Fraction, chosen: "LinearUnit" | None) -> tuple[float, "LinearUnit"] | None:
             if chosen is None:
                 return None
+            
+            chosen = _linearize_for_composition(chosen)
             final_unit = chosen ** target_exp
 
             # Only attempt prefix optimization when not forced by requested_unit and |exp| == 1,

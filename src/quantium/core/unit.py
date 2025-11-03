@@ -10,7 +10,7 @@ from quantium.core.utils import rationalize
 from quantium.io.unit_simplifier import UnitNameSimplifier
 
 if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
-    from quantium.core.quantity import LinearQuantity
+    from quantium.core.quantity import LinearQuantity, AffineQuantity
 
 
 @runtime_checkable
@@ -25,6 +25,10 @@ class Unit(Protocol):
     # Is this a delta (difference) unit? (only meaningful for linear)
     @property
     def is_delta(self) -> bool: ...
+
+
+    @property
+    def is_si(self) -> bool: ...
 
     # # Absolute conversions (apply offset if present)
     def to_base_abs(self, x: float) -> float: ...
@@ -44,6 +48,9 @@ class LinearUnit(Unit):
     scale_to_si: float
     dim: Dim
     _is_delta : bool = False
+    # by default delta units even with scale=1 (such as delta_degC) are not considered 
+    # as SI quantities, but (delta_degK) should be treated as si for delta temperature quantities
+    _treat_si : bool = False 
 
     def __post_init__(self) -> None:
         if len(self.dim) != 7:
@@ -70,9 +77,9 @@ class LinearUnit(Unit):
 
     
     @classmethod
-    def delta(cls, name: str, scale_to_si: float, dim: Dim) -> LinearUnit:
+    def delta(cls, name: str, scale_to_si: float, dim: Dim, treat_si=False) -> LinearUnit:
         """Factory for delta (difference) units."""
-        return cls(name, scale_to_si, dim, _is_delta=True)
+        return cls(name, scale_to_si, dim, _is_delta=True, _treat_si=treat_si)
 
     @property
     def is_linear(self) -> bool:
@@ -81,6 +88,15 @@ class LinearUnit(Unit):
     @property
     def is_delta(self) -> bool:
         return self._is_delta
+    
+    @property
+    def is_si(self) -> bool:
+        if not self.is_delta and self.scale_to_si == 1:
+            return True
+        elif self.is_delta and self.scale_to_si == 1 and self._treat_si:
+            return True
+        
+        return False
     
 
     def __eq__(self, other: object) -> bool:
@@ -193,6 +209,103 @@ class LinearUnit(Unit):
         return LinearUnit(normalized_name, new_scale, new_dim)
 
 
+@dataclass(frozen=True, slots=True)
+class AffineUnit(Unit):
+    """
+    Affine unit (e.g., degrees Celsius) with scale and offset relative to SI.
+
+    Absolute conversions use both scale and offset:
+      x_SI   = scale_to_si * x + offset_to_si
+      x_unit = (x_SI - offset_to_si) / scale_to_si
+
+    Delta conversions use the provided delta_unit (purely multiplicative).
+
+    Notes:
+      • Affine units are not closed under multiplication/division/power in the
+        usual sense; such algebra should be performed on deltas.
+      • For "delta" temperatures (e.g., Δ°C), use the LinearUnit given in delta_unit.
+    """
+
+    name: str
+    scale_to_si: float
+    offset_to_si: float
+    dim: Dim
+    delta_unit: "LinearUnit"
+
+    def __post_init__(self) -> None:
+        if len(self.dim) != 7:
+            raise ValueError("dim must be a 7-tuple (L,M,T,I,Θ,N,J)")
+        if not (self.scale_to_si > 0 and isfinite(self.scale_to_si)):
+            raise ValueError("scale_to_si must be a positive, finite number")
+        if not isfinite(self.offset_to_si):
+            raise ValueError("offset_to_si must be finite")
+        if not isinstance(self.delta_unit, Unit) or not self.delta_unit.is_linear:
+            raise TypeError("delta_unit must be a LinearUnit")
+
+    # --- Unit protocol ---
+
+    @property
+    def is_linear(self) -> bool:
+        return False
+
+    @property
+    def is_delta(self) -> bool:
+        return False
+    
+    @property
+    def is_si(self) -> bool:
+        # Must be affine (not linear) with no offset and unity scale.
+        if self.scale_to_si != 1.0 or self.offset_to_si != 0.0:
+            return False
+
+        # Delta unit should itself be SI (ΔK)
+        if hasattr(self.delta_unit, "is_si") and self.delta_unit.is_si:
+            return True
+
+        return False
+
+    # Absolute conversions (apply offset)
+    def to_base_abs(self, x: float) -> float:
+        return x * self.scale_to_si + self.offset_to_si
+
+    def from_base_abs(self, x: float) -> float:
+        return (x - self.offset_to_si) / self.scale_to_si
+
+    # Delta conversions delegate to the provided delta_unit
+    def to_base_delta(self, dx: float) -> float:
+        return self.delta_unit.to_base_delta(dx)
+
+    def from_base_delta(self, dx: float) -> float:
+        return self.delta_unit.from_base_delta(dx)
+
+    # --- Equality and representation ---
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AffineUnit):
+            return NotImplemented
+        return (
+            self.dim == other.dim
+            and isclose(self.scale_to_si, other.scale_to_si, rel_tol=1e-12)
+            and isclose(self.offset_to_si, other.offset_to_si, rel_tol=1e-12)
+            and self.delta_unit == other.delta_unit
+        )
+    
+    def __rmul__(self, value: float) -> "AffineQuantity":
+        from quantium.core.quantity import AffineQuantity  # lazy import to avoid cycles
+        scalar = float(value)
+        return AffineQuantity(scalar, self)
+
+    # --- Disallow other algebra on affine *units* (optional but nice) ---
+    def __mul__(self, other):
+        raise TypeError("Multiplying affine units is undefined; use delta units for algebra.")
+    def __truediv__(self, other):
+        raise TypeError("Dividing affine units is undefined; use delta units for algebra.")
+    def __rtruediv__(self, other):
+        raise TypeError("Dividing by an affine unit is undefined; use delta units for algebra.")
+    def __pow__(self, n):
+        raise TypeError("Exponentiating affine units is undefined; use delta units for algebra.")
+
+
 UNIT_SIMPLIFIER = UnitNameSimplifier(LinearUnit)
 
-__all__ = ["Unit", "UNIT_SIMPLIFIER"]
+__all__ = ["Unit", "LinearUnit", "AffineUnit" "UNIT_SIMPLIFIER"]

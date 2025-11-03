@@ -41,7 +41,8 @@ from quantium.core.dimensions import (
     dim_mul,
     dim_pow,
 )
-from quantium.core.unit import LinearUnit, LinearUnit
+from quantium.core.unit import LinearUnit, AffineUnit
+from quantium.core.quantity import AffineQuantity
 from quantium.units.parser import extract_unit_expr
 
 
@@ -345,7 +346,6 @@ def _bootstrap_default_registry() -> UnitsRegistry:
         LinearUnit("kg",  1.0, MASS),         # mass
         LinearUnit("s",   1.0, TIME),         # time
         LinearUnit("A",   1.0, CURRENT),      # electric current
-        LinearUnit("K",   1.0, TEMPERATURE),  # temperature
         LinearUnit("mol", 1.0, AMOUNT),       # amount of substance
         LinearUnit("cd",  1.0, LUMINOUS),     # luminous intensity
     )
@@ -429,12 +429,18 @@ def _bootstrap_default_registry() -> UnitsRegistry:
         reg.register(LinearUnit(sym, scale, dim))
     for sym, scale, dim in time_units:
         reg.register(LinearUnit(sym, scale, dim))
-
-
-    # Temperature Units
+    
+    # Temperature Delta Units
+    reg.register(LinearUnit.delta('ΔK', 1.0, TEMPERATURE, treat_si=True))
     reg.register(LinearUnit.delta('Δ°C', 1, TEMPERATURE))
     reg.register(LinearUnit.delta('Δ°F', 5/9, TEMPERATURE))
     reg.register(LinearUnit.delta("Δ°R", 5/9, TEMPERATURE))
+
+    # Temperature Units
+    reg.register(AffineUnit('°C', 1,  273.15, TEMPERATURE, delta_unit=reg.get('Δ°C')))
+    reg.register(AffineUnit("°F", 5.0 / 9.0, 255.3722222222222, TEMPERATURE, delta_unit=reg.get("Δ°F")))
+    reg.register(AffineUnit("°R", 5.0 / 9.0, 0.0, TEMPERATURE, delta_unit=reg.get("Δ°F")))
+    reg.register(AffineUnit('K', 1.0, 0.0, TEMPERATURE, delta_unit=reg.get('ΔK')))
 
     # Common aliases
     reg.register_alias("ohm", "Ω")
@@ -464,7 +470,7 @@ def _bootstrap_default_registry() -> UnitsRegistry:
     reg.register_alias("millennia", "millennium")
 
 
-    # Temperature aliases
+    # Delta Temperature aliases
     reg.register_alias("delta_degC", "Δ°C")
     reg.register_alias("delta_deg_celsius", "Δ°C")
     reg.register_alias("delta_celsius", "Δ°C")
@@ -478,13 +484,33 @@ def _bootstrap_default_registry() -> UnitsRegistry:
     reg.register_alias("delta_rankine", "Δ°R")
 
 
+    # Temperature aliases
+    reg.register_alias("degC", "°C")
+    reg.register_alias("deg_celsius", "°C")
+    reg.register_alias("celsius", "°C")
+    
+    reg.register_alias("degF", "°F")
+    reg.register_alias("deg_fahrenheit", "°F")
+    reg.register_alias("fahrenheit", "°F")
+
+    reg.register_alias("degR", "°R")
+    reg.register_alias("deg_rankine", "°R")
+    reg.register_alias("rankine", "°R")
+
+    reg.register_alias("delta_K", "ΔK")
+    reg.register_alias("delta_k", "ΔK")
+    reg.register_alias("delta_kelvin", "ΔK")
+    reg.register_alias("kelvin", "K")
+
+
 
     reg.set_non_prefixable([
         "kg",
         "min", "h", "d", "wk", "fortnight",
         "mo", "yr", "yr_julian",
         "decade", "century", "millennium",
-        "Δ°C", "Δ°F", "K"
+        "Δ°C", "Δ°F", "Δ°R", "ΔK",
+        "K",
     ])
 
     return reg

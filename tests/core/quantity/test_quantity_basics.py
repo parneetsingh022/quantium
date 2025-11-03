@@ -354,24 +354,24 @@ def test_compare_with_non_quantity_non_number_raises_typeerror():
 # Delta temperature units: Δ°C, Δ°F, Δ°R
 # ----------------------------
 
-def test_delta_c_to_kelvin():
+def test_delta_c_to_delta_kelvin():
     # 10 Δ°C == 10 K (no offset for deltas)
     q = 10 * u("Δ°C")
-    out = q.to("K")
+    out = q.to("delta_k")
     assert math.isclose(shown(out), 10.0)
     assert out.dim == q.dim
 
-def test_delta_f_to_kelvin():
+def test_delta_f_to_delta_kelvin():
     # 18 Δ°F == 10 K  (scale 5/9)
     q = 18 * u("Δ°F")
-    out = q.to("K")
+    out = q.to("delta_K")
     assert math.isclose(shown(out), 10.0, rel_tol=1e-12)
     assert out.dim == q.dim
 
-def test_delta_r_to_kelvin():
+def test_delta_r_to_delta_kelvin():
     # 9 Δ°R == 5 K  (scale 5/9)
     q = 9 * u("Δ°R")
-    out = q.to("K")
+    out = q.to("delta_K")
     assert math.isclose(shown(out), 5.0, rel_tol=1e-12)
     assert out.dim == q.dim
 

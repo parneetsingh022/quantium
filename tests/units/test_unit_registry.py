@@ -22,7 +22,7 @@ from quantium.core.dimensions import (
     dim_mul,
     dim_pow,
 )
-from quantium.core.unit import LinearUnit
+from quantium.core.unit import LinearUnit, AffineUnit
 
 
 # We import the module under test once, and access internals we intentionally
@@ -54,10 +54,9 @@ def patched_default(monkeypatch, reg):
 # ---------------------------------------------------------------------------
 
 def test_base_units_present(reg):
-    for sym, dim in [("m", LENGTH), ("kg", MASS), ("s", TIME), ("A", CURRENT), ("K", TEMPERATURE), ("mol", AMOUNT), ("cd", LUMINOUS)]:
+    for sym, dim, utype in [("m", LENGTH, LinearUnit), ("kg", MASS, LinearUnit), ("s", TIME, LinearUnit), ("A", CURRENT, LinearUnit), ("delta_K", TEMPERATURE, LinearUnit), ("K", TEMPERATURE, AffineUnit), ("mol", AMOUNT, LinearUnit), ("cd", LUMINOUS, LinearUnit)]:
         u = reg.get(sym)
-        assert isinstance(u, LinearUnit)
-        assert u.name == sym
+        assert isinstance(u, utype)
         assert u.scale_to_si == pytest.approx(1.0)
         assert u.dim == dim
 
