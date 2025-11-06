@@ -343,7 +343,6 @@ class LinearQuantity(Quantity):
     
     def __mul__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
         from quantium.core.unit import LinearUnit, AffineUnit
-        from quantium.core.quantity import AffineQuantity, LinearQuantity
 
         # local finisher: compose name, then auto-promote if needed
         def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
@@ -404,8 +403,7 @@ class LinearQuantity(Quantity):
 
     def __truediv__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
         from quantium.core.unit import LinearUnit, AffineUnit
-        from quantium.core.quantity import AffineQuantity, LinearQuantity
-
+        
         # Compose → choose display unit → auto-promote (K/°R → AffineQuantity) if applicable
         def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
             value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
@@ -460,7 +458,6 @@ class LinearQuantity(Quantity):
 
     def __rtruediv__(self, other: "Quantity | Unit | Number") -> "Quantity":
         from quantium.core.unit import LinearUnit, AffineUnit
-        from quantium.core.quantity import AffineQuantity, LinearQuantity
 
         # Helper: compose → pick display unit → auto-promote if pure-temperature head (K/°R)
         def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
