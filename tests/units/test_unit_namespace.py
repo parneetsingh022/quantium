@@ -164,7 +164,7 @@ def test_registry_blocks_reserved_name_on_register():
     reg = _bootstrap_default_registry()
     u = reg.as_namespace()
     # Try to register directly via the registry (bypassing UnitNamespace.define)
-    from quantium.core.quantity import LinearUnit
+    from quantium.core.unit import LinearUnit
     with pytest.raises(ValueError, match="UnitNamespace"):
         reg.register(LinearUnit("define", 1.0, u.m.dim))
 
