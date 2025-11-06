@@ -30,13 +30,16 @@ _ALLOWED_CANON_PREFIX_SYMBOLS = frozenset({"G", "M","k", "m", "\u00b5", "n", "p"
 
 
 def _linearize_for_composition(u):
-    """
-    Ensure only linear (multiplicative) units enter composition:
-    affine units (e.g., K, °C) are replaced by their delta_unit (ΔK, Δ°C).
-    """
-    from quantium.core.unit import AffineUnit
-    return u.delta_unit if isinstance(u, AffineUnit) else u
-
+    from quantium.core.unit import AffineUnit, LinearUnit
+    if isinstance(u, AffineUnit):
+        du = u.delta_unit  # this is a LinearUnit
+        if u.offset_to_si != 0.0:
+            # absolute °C/°F: force delta (Δ°C/Δ°F)
+            return du
+        # zero-offset affine (K / °R): keep glyph but make it LINEAR
+        # IMPORTANT: return a LinearUnit, not AffineUnit
+        return LinearUnit(name=(u.name or du.name), scale_to_si=du.scale_to_si, dim=du.dim)
+    return u
 
 
 def _dim_key(dim: Dim) -> tuple[int, ...]:
@@ -367,8 +370,6 @@ class UnitNameSimplifier:
                 base = DEFAULT_REGISTRY.get(symbol)
             except ValueError:
                 return None
-            
-            base = _linearize_for_composition(base)
 
             abs_exp = abs(exponent)
             unit_part = base if abs_exp == 1 else (base ** abs_exp)
@@ -450,7 +451,7 @@ class UnitNameSimplifier:
                 u = _registry_get(f"{p.symbol}{sym}")
                 if u is None:
                     continue
-                u = _linearize_for_composition(u)
+
                 u = u if not invert else (u ** -1)
                 cands.append((_value_for(u), u))
             return cands
@@ -504,7 +505,6 @@ class UnitNameSimplifier:
                 if base_sym in comps:  # only if user referenced this symbol
                     base_unit = _registry_get(base_sym)
                     if base_unit is not None:
-                        base_unit = _linearize_for_composition(base_unit)
                         candidate = base_unit ** power
                         return _value_for(candidate), candidate
 
@@ -525,6 +525,7 @@ class UnitNameSimplifier:
                 return None
             
             chosen = _linearize_for_composition(chosen)
+            
             final_unit = chosen ** target_exp
 
             # Only attempt prefix optimization when not forced by requested_unit and |exp| == 1,

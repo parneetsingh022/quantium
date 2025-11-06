@@ -510,7 +510,7 @@ def _bootstrap_default_registry() -> UnitsRegistry:
         "mo", "yr", "yr_julian",
         "decade", "century", "millennium",
         "Δ°C", "Δ°F", "Δ°R", "ΔK",
-        "K",
+        "K", "R"
     ])
 
     return reg

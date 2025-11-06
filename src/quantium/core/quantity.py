@@ -30,6 +30,7 @@ from quantium.core.dimensions import DIM_0, Dim, dim_div, dim_mul, dim_pow
 from quantium.core.unit import UNIT_SIMPLIFIER, Unit, LinearUnit, AffineUnit
 from quantium.io.unit_simplifier import SymbolComponents
 from quantium.units.parser import extract_unit_expr
+from quantium.errors import AffineTemperatureOperationError
 
 
 Number = Union[int, float]
@@ -153,6 +154,42 @@ class LinearQuantity(Quantity):
         other_si_mag = getattr(other, '_mag_si', 0.0)
         # Greater than OR fuzzy-equal
         return self._mag_si > other_si_mag or self._is_close(other_si_mag)
+    
+    def _auto_promote_if_affine_head(
+        self,
+        result_mag_si: float,
+        dim: Dim,
+        unit: LinearUnit
+    ) -> Unit:
+        """
+        If the chosen unit 'unit' is (by *symbol*) an absolute affine head in the registry
+        (e.g., 'K', '°R'), return an AffineQuantity in that affine unit.
+        Otherwise return a LinearQuantity in the given linear unit.
+        """
+        # Only consider pure temperature results
+        from quantium.core.dimensions import TEMPERATURE
+        if dim != TEMPERATURE:
+            return LinearQuantity(unit.from_base_abs(result_mag_si), unit)
+
+        # If the linearized name is clearly a delta unit, keep it linear.
+        name = unit.name or ""
+        if unit.is_delta:
+            return LinearQuantity(unit.from_base_abs(result_mag_si), unit)
+
+        # Try to find an affine head in the registry with the same symbol (K, °R, etc.)
+        try:
+            from quantium.units.registry import DEFAULT_REGISTRY as _ureg
+            candidate = _ureg.get(name)
+        except ValueError:
+            candidate = None
+
+        from quantium.core.unit import AffineUnit
+        if isinstance(candidate, AffineUnit) and candidate.offset_to_si == 0.0:
+            # Promote: represent as absolute in that affine unit
+            return AffineQuantity(candidate.from_base_abs(result_mag_si), candidate)
+
+        # Otherwise keep linear
+        return LinearQuantity(unit.from_base_abs(result_mag_si), unit)
     
     # --- Hashing Solution ---
 
@@ -305,92 +342,180 @@ class LinearQuantity(Quantity):
         return LinearQuantity(self.unit.from_base_abs(diff_si), self.unit)
     
     def __mul__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
-        # scalar × quantity
+        from quantium.core.unit import LinearUnit, AffineUnit
+        from quantium.core.quantity import AffineQuantity, LinearQuantity
+
+        # local finisher: compose name, then auto-promote if needed
+        def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            # Use your helper to decide Linear vs Affine based on the chosen unit head (K/°R vs ΔK/Δ°C)
+            return self._auto_promote_if_affine_head(result_mag_si, result_dim, unit)
+
+        # ---------- scalar × quantity ----------
         if isinstance(other, (int, float)):
             new_si = self._mag_si * float(other)
+            # Scalar scaling preserves the same display unit; do NOT auto-promote here.
             return LinearQuantity(self.unit.from_base_abs(new_si), self.unit)
 
-        # quantity × unit
-        if isinstance(other, LinearUnit):
+        # ---------- quantity × unit ----------
+        if isinstance(other, LinearUnit) or (isinstance(other, AffineUnit) and other.offset_to_si == 0.0):
             result_mag_si = self._mag_si * other.scale_to_si
             result_dim = dim_mul(self.dim, other.dim)
-
-            # Merge the symbol–exponent maps of self (priority 0) and other (priority 1) 
-            # into a combined unit representation
             components = UNIT_SIMPLIFIER.combine_symbol_maps(
                 self._symbol_component_map(0),
                 UNIT_SIMPLIFIER.unit_symbol_map(other, 1),
             )
+            return _finish(result_mag_si, result_dim, components)
 
-            
-            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-            return LinearQuantity(value, unit)
-        
-        if not isinstance(other, LinearQuantity):
-            raise TypeError(
-                "Multiplication with absolute affine quantities is undefined; "
-                "use delta (linear) quantities instead."
+        # Block absolute affine *units* with non-zero offset (°C, °F)
+        if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+            raise AffineTemperatureOperationError('Multiplication')
+
+
+        # ---------- quantity × quantity (linear × linear) ----------
+        if isinstance(other, LinearQuantity):
+            result_mag_si = self._mag_si * other._mag_si
+            result_dim = dim_mul(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                self._symbol_component_map(0),
+                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
             )
-        
+            return _finish(result_mag_si, result_dim, components)
 
-        # quantity × quantity
-        result_mag_si = self._mag_si * other._mag_si
-        result_dim = dim_mul(self.dim, other.dim)
-        components = UNIT_SIMPLIFIER.combine_symbol_maps(
-            self._symbol_component_map(0),
-            UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
-        )
-        value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return LinearQuantity(value, unit)
+        # ---------- quantity × quantity (linear × affine) ----------
+        if isinstance(other, AffineQuantity):
+            # allow only ratio-scale affines (offset==0: K, °R)
+            if other.unit.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Multiplication')
+
+            result_mag_si = self._mag_si * other._mag_si
+            result_dim = dim_mul(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                self._symbol_component_map(0),
+                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
+            )
+            return _finish(result_mag_si, result_dim, components)
+
+        return NotImplemented
 
     def __rmul__(self, other: float | int) -> "Quantity":
         # allows 3 * (2 m) -> 6 m
         return self.__mul__(other)
 
     def __truediv__(self, other: "Quantity | LinearUnit | Number") -> "Quantity":
-        # quantity / scalar
+        from quantium.core.unit import LinearUnit, AffineUnit
+        from quantium.core.quantity import AffineQuantity, LinearQuantity
+
+        # Compose → choose display unit → auto-promote (K/°R → AffineQuantity) if applicable
+        def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            return self._auto_promote_if_affine_head(result_mag_si, result_dim, unit)
+
+        # -------- quantity / scalar --------
         if isinstance(other, (int, float)):
             new_si = self._mag_si / float(other)
+            # Scalar scaling keeps same display unit; no promotion
             return LinearQuantity(self.unit.from_base_abs(new_si), self.unit)
-        
-        # quantity / unit
-        if isinstance(other, LinearUnit):
+
+        # -------- quantity / unit --------
+        if isinstance(other, LinearUnit) or (isinstance(other, AffineUnit) and other.offset_to_si == 0.0):
             result_mag_si = self._mag_si / other.scale_to_si
             result_dim = dim_div(self.dim, other.dim)
             components = UNIT_SIMPLIFIER.combine_symbol_maps(
                 self._symbol_component_map(0),
                 UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(other, 1), -1),
             )
-            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-            return LinearQuantity(value, unit)
-        
-        if not isinstance(other, LinearQuantity):
-            raise TypeError(
-                "Division with absolute affine quantities is undefined; "
-                "use delta (linear) quantities instead."
+            return _finish(result_mag_si, result_dim, components)
+
+        # Block non-zero-offset affine *units* (°C, °F)
+        if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+            raise AffineTemperatureOperationError('Division')
+
+
+        # -------- quantity / quantity (linear / linear) --------
+        if isinstance(other, LinearQuantity):
+            result_mag_si = self._mag_si / other._mag_si
+            result_dim = dim_div(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                self._symbol_component_map(0),
+                UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1), -1),
             )
+            return _finish(result_mag_si, result_dim, components)
 
-        # quantity / quantity
-        result_mag_si = self._mag_si / other._mag_si
-        result_dim = dim_div(self.dim, other.dim)
-        components = UNIT_SIMPLIFIER.combine_symbol_maps(
-            self._symbol_component_map(0),
-            UNIT_SIMPLIFIER.scale_symbol_map(
-                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1), -1
-            ),
-        )
-        value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return LinearQuantity(value, unit)
+        # -------- quantity / quantity (linear / affine) --------
+        if isinstance(other, AffineQuantity):
+            if other.unit.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Division')
 
-    def __rtruediv__(self, other: float | int) -> "Quantity":
-        # scalar / quantity  -> returns Quantity with inverse dimension
-        if not isinstance(other, (int, float)):
-            return NotImplemented
-        result_dim = dim_div(DIM_0, self.dim)
-        result_mag_si = float(other) / self._mag_si
-        components = UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1)
-        value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
-        return LinearQuantity(value, unit)
+            result_mag_si = self._mag_si / other._mag_si
+            result_dim = dim_div(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                self._symbol_component_map(0),
+                UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1), -1),
+            )
+            return _finish(result_mag_si, result_dim, components)
+
+        return NotImplemented
+
+
+    def __rtruediv__(self, other: "Quantity | Unit | Number") -> "Quantity":
+        from quantium.core.unit import LinearUnit, AffineUnit
+        from quantium.core.quantity import AffineQuantity, LinearQuantity
+
+        # Helper: compose → pick display unit → auto-promote if pure-temperature head (K/°R)
+        def _finish(result_mag_si: float, result_dim: Dim, components: SymbolComponents) -> "Quantity":
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            return self._auto_promote_if_affine_head(result_mag_si, result_dim, unit)
+
+        # -------- scalar / quantity (already supported) --------
+        if isinstance(other, (int, float)):
+            result_dim = dim_div(DIM_0, self.dim)
+            result_mag_si = float(other) / self._mag_si
+            components = UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1)
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            return self._auto_promote_if_affine_head(result_mag_si, result_dim, unit)
+
+        # -------- quantity / quantity where LEFT did NotImplemented --------
+        if isinstance(other, LinearQuantity):
+            # other / self  (linear / linear)
+            result_mag_si = other._mag_si / self._mag_si
+            result_dim = dim_div(other.dim, self.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
+                UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1),
+            )
+            return _finish(result_mag_si, result_dim, components)
+
+        if isinstance(other, AffineQuantity):
+            # Allow only ratio-scale (offset==0) affine temperatures (K, °R)
+            if other.unit.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Division')
+
+            # Treat offset-free affine as linear in multiplication/division
+            result_mag_si = other._mag_si / self._mag_si
+            result_dim = dim_div(other.dim, self.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(other.unit, 1),
+                UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1),
+            )
+            return _finish(result_mag_si, result_dim, components)
+
+        # -------- unit / quantity (if your Unit types fall back here) --------
+        if isinstance(other, LinearUnit) or (isinstance(other, AffineUnit) and other.offset_to_si == 0.0):
+            # (unit) / (quantity)
+            result_mag_si = other.scale_to_si / self._mag_si
+            result_dim = dim_div(other.dim, self.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(other, 1),
+                UNIT_SIMPLIFIER.scale_symbol_map(self._symbol_component_map(0), -1),
+            )
+            return _finish(result_mag_si, result_dim, components)
+
+        if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+            raise AffineTemperatureOperationError('Division')
+
+
+        return NotImplemented
 
     def __pow__(self, n: int | Fraction) -> "Quantity":
         new_unit = self.unit ** n
@@ -498,6 +623,14 @@ class AffineQuantity:
         self.dim = unit.dim
         self.unit = unit
 
+    def _ensure_ratio_scale(self) -> None:
+        if self.unit.offset_to_si != 0.0:
+            raise TypeError(
+                "Multiplication/division with absolute affine quantities that have a non-zero offset "
+                "is undefined. Only ratio-scale affine units with zero offset (e.g., K, °R) may be used "
+                "in multiplicative expressions. For °C/°F use a delta (linear) temperature instead."
+            )
+
     # --- conversions ---
 
     def to(self, new_unit: "AffineUnit | str") -> "AffineQuantity":
@@ -542,6 +675,7 @@ class AffineQuantity:
     @property
     def value(self) -> float:
         return self.unit.from_base_abs(self._mag_si)
+    
 
     def as_key(self, precision: int = 12) -> tuple:
         rounded_mag_si = round(self._mag_si, precision)
@@ -641,23 +775,14 @@ class AffineQuantity:
         return NotImplemented
 
     def __mul__(self, other: object):
-        # Disallow multiplying affine absolutes by anything other than *dimensionless* scalars.
-        if isinstance(other, (int, float)):
-            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
-        if isinstance(other, (LinearQuantity, AffineQuantity, LinearUnit, Unit)):
-            raise TypeError("Multiplication with absolute affine quantities is undefined.")
         return NotImplemented
 
     def __rmul__(self, other: object):
-        if isinstance(other, (int, float)):
-            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
         return NotImplemented
-
-    def __truediv__(self, other: object):
-        if isinstance(other, (int, float)):
-            raise TypeError("Scaling absolute affine quantities by a scalar is undefined.")
-        if isinstance(other, (LinearQuantity, AffineQuantity, LinearUnit, Unit)):
-            raise TypeError("Division with absolute affine quantities is undefined.")
+        
+    def __truediv__(self, other: "Quantity"):
+        if isinstance(other, AffineQuantity) and other.unit.offset_to_si == 0:
+            return LinearQuantity(self._mag_si/other._mag_si, LinearUnit('', 1, DIM_0))
         return NotImplemented
 
     def __rtruediv__(self, other: object):
