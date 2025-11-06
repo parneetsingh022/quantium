@@ -323,7 +323,7 @@ def test_specific_heat_capacity_K_in_denominator():
 
 def test_celsius_in_denominator_raises_error():
     with pytest.raises(TypeError):
-        X = 1 * u.J / (u.mol * u.degC)
+        _ = 1 * u.J / (u.mol * u.degC)
    
 
 
