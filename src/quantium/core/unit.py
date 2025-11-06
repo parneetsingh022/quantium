@@ -404,4 +404,4 @@ class AffineUnit(Unit):
 
 UNIT_SIMPLIFIER = UnitNameSimplifier(LinearUnit)
 
-__all__ = ["Unit", "LinearUnit", "AffineUnit" "UNIT_SIMPLIFIER"]
+__all__ = ["Unit", "LinearUnit", "AffineUnit", "UNIT_SIMPLIFIER"]
