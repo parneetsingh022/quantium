@@ -29,17 +29,24 @@ _MAX_CANON_POWER = 12
 _ALLOWED_CANON_PREFIX_SYMBOLS = frozenset({"G", "M","k", "m", "\u00b5", "n", "p"})
 
 
-def _linearize_for_composition(u):
+def _linearize_for_composition(u: "Unit") -> "LinearUnit":
+    """Return a guaranteed LinearUnit for composition algebra.
+
+    Affine units with non-zero offset (°C/°F) are converted to their *delta* unit.
+    Ratio-scale affine units (K/°R) retain their symbol but are re-instantiated
+    as a LinearUnit so downstream code never has to handle AffineUnit logic.
+    """
     from quantium.core.unit import AffineUnit, LinearUnit
     if isinstance(u, AffineUnit):
-        du = u.delta_unit  # this is a LinearUnit
+        du = u.delta_unit  # underlying LinearUnit
         if u.offset_to_si != 0.0:
-            # absolute °C/°F: force delta (Δ°C/Δ°F)
-            return du
-        # zero-offset affine (K / °R): keep glyph but make it LINEAR
-        # IMPORTANT: return a LinearUnit, not AffineUnit
+            return du  # absolute °C/°F → use delta (Δ°C/Δ°F)
+        # ratio-scale affine (K / °R): preserve glyph, force linear
         return LinearUnit(name=(u.name or du.name), scale_to_si=du.scale_to_si, dim=du.dim)
-    return u
+    if isinstance(u, LinearUnit):
+        return u
+    # Defensive: unexpected Unit implementation
+    raise TypeError("_linearize_for_composition expected LinearUnit or AffineUnit")
 
 
 def _dim_key(dim: Dim) -> tuple[int, ...]:
@@ -301,23 +308,27 @@ class UnitNameSimplifier:
         components: SymbolComponents,
         axis_idx: int,
         target_exp: Fraction,
-    ) -> "LinearUnit" | None:
+    ) -> "LinearUnit | AffineUnit | None":
         from quantium.units.registry import DEFAULT_REGISTRY
 
         target_sign = 1 if target_exp > 0 else -1
-        best: tuple[str, Fraction, "LinearUnit"] | None = None
+        best: tuple[str, Fraction, "LinearUnit | AffineUnit"] | None = None
         best_score: Fraction = Fraction(-1, 1)
-        fallback: tuple[str, Fraction, "LinearUnit"] | None = None
+        fallback: tuple[str, Fraction, "LinearUnit | AffineUnit"] | None = None
         fallback_score: Fraction = Fraction(-1, 1)
 
         ordered_items = sorted(components.items(), key=lambda item: item[1][1])
 
+        from quantium.core.unit import LinearUnit, AffineUnit
         for symbol, (exponent, _) in ordered_items:
             if exponent == 0:
                 continue
             try:
                 candidate = DEFAULT_REGISTRY.get(symbol)
             except ValueError:
+                continue
+            # Only consider known unit types
+            if not isinstance(candidate, (LinearUnit, AffineUnit)):
                 continue
 
             axis_info = self._dim_single_axis(candidate.dim)
@@ -367,9 +378,10 @@ class UnitNameSimplifier:
             if exponent == 0:
                 continue
             try:
-                base = DEFAULT_REGISTRY.get(symbol)
+                u = DEFAULT_REGISTRY.get(symbol)
             except ValueError:
                 return None
+            base = _linearize_for_composition(u)
 
             abs_exp = abs(exponent)
             unit_part = base if abs_exp == 1 else (base ** abs_exp)
@@ -426,7 +438,9 @@ class UnitNameSimplifier:
         def _registry_get(symbol: str) -> "LinearUnit | None":
             from quantium.units.registry import DEFAULT_REGISTRY
             try:
-                return DEFAULT_REGISTRY.get(symbol)
+                u = DEFAULT_REGISTRY.get(symbol)
+                # Linearize any affine temperature headers into their linear delta
+                return _linearize_for_composition(u)
             except ValueError:
                 return None
 
@@ -520,7 +534,7 @@ class UnitNameSimplifier:
         # was requested, it also checks for better prefixed forms (like "km" or "ms")
         # to make the value more readable.
         # Example: chosen="m", target_exp=1 → tries m, mm, km and picks the best (e.g., 5 km instead of 5000 m)
-        def _single_axis_path(target_exp: int | Fraction, chosen: "LinearUnit" | None) -> tuple[float, "LinearUnit"] | None:
+        def _single_axis_path(target_exp: int | Fraction, chosen: "LinearUnit | AffineUnit | None") -> tuple[float, "LinearUnit"] | None:
             if chosen is None:
                 return None
             

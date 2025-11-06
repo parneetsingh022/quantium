@@ -23,7 +23,8 @@ The system supports:
 from __future__ import annotations
 
 from math import isclose
-from typing import Protocol, runtime_checkable, Union
+from typing import Protocol, runtime_checkable, Union, NoReturn
+from types import NotImplementedType
 from fractions import Fraction
 
 from quantium.core.dimensions import DIM_0, Dim, dim_div, dim_mul, dim_pow
@@ -160,7 +161,7 @@ class LinearQuantity(Quantity):
         result_mag_si: float,
         dim: Dim,
         unit: LinearUnit
-    ) -> Unit:
+    ) -> Quantity:
         """
         If the chosen unit 'unit' is (by *symbol*) an absolute affine head in the registry
         (e.g., 'K', '°R'), return an AffineQuantity in that affine unit.
@@ -592,7 +593,7 @@ class LinearQuantity(Quantity):
         raise ValueError("Unknown format spec; use '', 'native', or 'si'")
 
 
-class AffineQuantity:
+class AffineQuantity(Quantity):
     """
     Absolute quantity expressed in an AffineUnit (e.g., °C).  Internally stores
     absolute SI magnitude via the unit's *absolute* conversion.
@@ -630,25 +631,36 @@ class AffineQuantity:
 
     # --- conversions ---
 
-    def to(self, new_unit: "AffineUnit | str") -> "AffineQuantity":
-        # allow strings if your registry/parser returns AffineUnit
+    def to(self, new_unit: "LinearUnit | str") -> "AffineQuantity":
+        # Resolve the requested target into an AffineUnit without reassigning the parameter
+        # (keeps mypy happy with the LinearUnit | str parameter type).
+        from quantium.core.unit import AffineUnit as _AffineUnit
+
+        target: _AffineUnit
         if isinstance(new_unit, str):
             from quantium.units.registry import DEFAULT_REGISTRY
-            from quantium.units.parser import extract_unit_expr
-            new_unit = extract_unit_expr(new_unit, DEFAULT_REGISTRY)
+            u = DEFAULT_REGISTRY.get(new_unit)
+            if not isinstance(u, _AffineUnit):
+                raise TypeError("AffineQuantity.to() requires an AffineUnit symbol (absolute unit with offset).")
+            target = u
+        else:
+            # If caller passed a LinearUnit instance directly, refuse.
+            if isinstance(new_unit, LinearUnit):
+                raise TypeError("AffineQuantity.to() requires an AffineUnit (absolute unit with offset).")
+            # Defensive: if runtime ever passes an AffineUnit directly, accept it.
+            if isinstance(new_unit, _AffineUnit):
+                target = new_unit
+            else:
+                raise TypeError("AffineQuantity.to() requires an AffineUnit (absolute unit with offset).")
 
-        from quantium.core.unit import AffineUnit  # local to avoid cycles
-        if not isinstance(new_unit, AffineUnit):
-            raise TypeError("AffineQuantity.to() requires an AffineUnit (absolute unit with offset).")
-
-        if new_unit.dim != self.dim:
+        if target.dim != self.dim:
             raise TypeError("Dimension mismatch in conversion")
 
-        if new_unit.name == self.unit.name:
+        if target.name == self.unit.name:
             return self
 
-        value = new_unit.from_base_abs(self._mag_si)
-        return AffineQuantity(value, new_unit)
+        value = target.from_base_abs(self._mag_si)
+        return AffineQuantity(value, target)
 
     def to_si(self) -> "AffineQuantity":
         """
@@ -708,23 +720,27 @@ class AffineQuantity:
 
     def __lt__(self, other: object) -> bool:
         self._check_dim_compatible(other)
-        return self._mag_si < other._mag_si and not self._is_close(other._mag_si)
+        other_si_mag = getattr(other, '_mag_si', 0.0)
+        return self._mag_si < other_si_mag and not self._is_close(other_si_mag)
 
     def __le__(self, other: object) -> bool:
         self._check_dim_compatible(other)
-        return self._mag_si < other._mag_si or self._is_close(other._mag_si)
+        other_si_mag = getattr(other, '_mag_si', 0.0)
+        return self._mag_si < other_si_mag or self._is_close(other_si_mag)
 
     def __gt__(self, other: object) -> bool:
         self._check_dim_compatible(other)
-        return self._mag_si > other._mag_si and not self._is_close(other._mag_si)
+        other_si_mag = getattr(other, '_mag_si', 0.0)
+        return self._mag_si > other_si_mag and not self._is_close(other_si_mag)
 
     def __ge__(self, other: object) -> bool:
         self._check_dim_compatible(other)
-        return self._mag_si > other._mag_si or self._is_close(other._mag_si)
+        other_si_mag = getattr(other, '_mag_si', 0.0)
+        return self._mag_si > other_si_mag or self._is_close(other_si_mag)
 
     # --- arithmetic ---
 
-    def __add__(self, other: object):
+    def __add__(self, other: object) -> Union["Quantity", NotImplementedType]:
         # Affine + Linear(delta) -> Affine
         if isinstance(other, LinearQuantity):
             if other.dim != self.dim:
@@ -739,13 +755,13 @@ class AffineQuantity:
 
         return NotImplemented
 
-    def __radd__(self, other: object):
+    def __radd__(self, other: object) -> Union["Quantity", NotImplementedType]:
         # Linear(delta) + Affine -> Affine
         if isinstance(other, LinearQuantity):
             return self.__add__(other)
         return NotImplemented
 
-    def __sub__(self, other: object):
+    def __sub__(self, other: object) -> Union["Quantity", NotImplementedType]:
         # Affine - Linear(delta) -> Affine
         if isinstance(other, LinearQuantity):
             if other.dim != self.dim:
@@ -765,27 +781,53 @@ class AffineQuantity:
 
         return NotImplemented
 
-    def __rsub__(self, other: object):
+    def __rsub__(self, other: object) -> NotImplementedType:
         # Linear(delta) - Affine is meaningless
         if isinstance(other, LinearQuantity):
             raise TypeError("Subtracting an absolute affine quantity from a delta is undefined.")
         return NotImplemented
 
-    def __mul__(self, other: object):
+    def __mul__(self, other: object) -> Union["Quantity", NotImplementedType]:
+        # Allow ratio-scale affine (offset==0.0) to behave like linear in products with LinearUnit
+        from quantium.core.unit import LinearUnit
+        if isinstance(other, LinearUnit):
+            self._ensure_ratio_scale()
+            result_mag_si = self._mag_si * other.scale_to_si
+            result_dim = dim_mul(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(self.unit, 0),
+                UNIT_SIMPLIFIER.unit_symbol_map(other, 1),
+            )
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            return LinearQuantity(value, unit)
         return NotImplemented
 
-    def __rmul__(self, other: object):
+    def __rmul__(self, other: object) -> NotImplementedType:
         return NotImplemented
         
-    def __truediv__(self, other: "Quantity"):
+    def __truediv__(self, other: "Quantity | LinearUnit | Number") -> Union["Quantity", NotImplementedType]:
+        from quantium.core.unit import LinearUnit
+        # Disallow dividing an absolute affine by scalars
+        if isinstance(other, (int, float)):
+            raise TypeError("Division of an absolute affine quantity by a scalar is undefined.")
         if isinstance(other, AffineQuantity) and other.unit.offset_to_si == 0:
             return LinearQuantity(self._mag_si/other._mag_si, LinearUnit('', 1, DIM_0))
+        if isinstance(other, LinearUnit):
+            self._ensure_ratio_scale()
+            result_mag_si = self._mag_si / other.scale_to_si
+            result_dim = dim_div(self.dim, other.dim)
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(self.unit, 0),
+                UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(other, 1), -1),
+            )
+            value, unit = UNIT_SIMPLIFIER.si_to_value_unit(result_mag_si, result_dim, components)
+            return LinearQuantity(value, unit)
         return NotImplemented
 
-    def __rtruediv__(self, other: object):
+    def __rtruediv__(self, other: object) -> NotImplementedType:
         return NotImplemented
 
-    def __pow__(self, n: int | "Fraction"):
+    def __pow__(self, n: int | "Fraction") -> NoReturn:
         raise TypeError("Exponentiation of absolute affine quantities is undefined.")
 
     # --- representation ---

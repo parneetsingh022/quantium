@@ -188,7 +188,12 @@ def _eval_plan(plan: Plan, reg: "UnitsRegistry") -> "LinearUnit":  # <-- FIX: Ad
         if not isinstance(op1, str):
             raise ValueError(f"Malformed 'name' plan (expected str): {plan!r}")
         try:
-            return reg.get(op1)
+            u = reg.get(op1)
+            # Only linear units are valid in algebraic expressions
+            from quantium.core.unit import LinearUnit
+            if not isinstance(u, LinearUnit):
+                raise ValueError(f"Unit '{op1}' is not a linear unit and cannot be used in expressions")
+            return u
         except Exception as e:
             raise ValueError(f"Unknown unit '{op1}': {e}") from None
 

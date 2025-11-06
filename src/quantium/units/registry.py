@@ -41,7 +41,7 @@ from quantium.core.dimensions import (
     dim_mul,
     dim_pow,
 )
-from quantium.core.unit import LinearUnit, AffineUnit
+from quantium.core.unit import LinearUnit, AffineUnit, Unit
 from quantium.core.quantity import AffineQuantity
 from quantium.units.parser import extract_unit_expr
 
@@ -101,7 +101,8 @@ class UnitsRegistry:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._units: Dict[str, LinearUnit] = {}
+        # Store both Linear and Affine units
+        self._units: Dict[str, Unit] = {}
         self._aliases: Dict[str, str] = {}
         self._non_prefixable: set[str] = set()
 
@@ -122,7 +123,7 @@ class UnitsRegistry:
         return normalize_symbol(symbol) in self._non_prefixable
 
     # -------------------------- public API ---------------------------------
-    def register(self, unit: LinearUnit, replace : bool = False) -> None:
+    def register(self, unit: LinearUnit | AffineUnit, replace : bool = False) -> None:
         """Register (or overwrite if replace is True) a `LinearUnit` under its canonical name.
 
         Use `register_alias` to add additional spellings without duplication.
@@ -213,7 +214,7 @@ class UnitsRegistry:
         except ValueError:
             return False
 
-    def get(self, symbol: str) -> LinearUnit:
+    def get(self, symbol: str) -> Unit:
         """Lookup a unit by symbol. If missing, try to synthesize via SI prefix.
 
         Raises `ValueError` if unknown.
@@ -240,7 +241,7 @@ class UnitsRegistry:
 
         raise ValueError(f"Unknown unit symbol: {symbol}")
 
-    def all(self) -> Mapping[str, LinearUnit]:
+    def all(self) -> Mapping[str, Unit]:
         with self._lock:
             return dict(self._units)
         
@@ -262,7 +263,8 @@ class UnitsRegistry:
     def _try_synthesize_prefixed(self, sym: str) -> Optional[LinearUnit]:
         # Already registered due to race? (cheap check)
         if sym in self._units:
-            return self._units[sym]
+            existing = self._units[sym]
+            return existing if isinstance(existing, LinearUnit) else None
 
         prefix, base_sym = self._split_prefix(sym)
         if prefix is None or not base_sym:
@@ -270,6 +272,9 @@ class UnitsRegistry:
 
         base = self._units.get(base_sym)
         if base is None:
+            return None
+        # Only linear units are prefixable
+        if not isinstance(base, LinearUnit):
             return None
 
         # Prevent stacked prefixes: base itself must not be prefixed
@@ -283,6 +288,13 @@ class UnitsRegistry:
         new_unit = LinearUnit(sym, base.scale_to_si * factor, base.dim)
         self._units[sym] = new_unit
         return new_unit
+
+    # Helper for callers that explicitly need a LinearUnit
+    def get_linear(self, symbol: str) -> LinearUnit:
+        u = self.get(symbol)
+        if not isinstance(u, LinearUnit):
+            raise TypeError(f"Requested linear unit for '{symbol}', but found non-linear (affine) unit")
+        return u
     
 
 class UnitNamespace:
@@ -303,10 +315,10 @@ class UnitNamespace:
         
         self._reg.register(LinearUnit(expr, float(scale) * reference.scale_to_si , reference.dim), replace)
 
-    def __call__(self, spec : "str") -> "LinearUnit":
+    def __call__(self, spec : "str") -> "Unit":
         return self._reg.get(spec)
     
-    def __getattr__(self, name: "str") -> "LinearUnit":
+    def __getattr__(self, name: "str") -> "Unit":
         try:
             return self._reg.get(name)
         except (KeyError, ValueError) as e:
@@ -437,10 +449,10 @@ def _bootstrap_default_registry() -> UnitsRegistry:
     reg.register(LinearUnit.delta("Δ°R", 5/9, TEMPERATURE))
 
     # Temperature Units
-    reg.register(AffineUnit('°C', 1,  273.15, TEMPERATURE, delta_unit=reg.get('Δ°C')))
-    reg.register(AffineUnit("°F", 5.0 / 9.0, 255.3722222222222, TEMPERATURE, delta_unit=reg.get("Δ°F")))
-    reg.register(AffineUnit("°R", 5.0 / 9.0, 0.0, TEMPERATURE, delta_unit=reg.get("Δ°F")))
-    reg.register(AffineUnit('K', 1.0, 0.0, TEMPERATURE, delta_unit=reg.get('ΔK')))
+    reg.register(AffineUnit('°C', 1,  273.15, TEMPERATURE, delta_unit=reg.get_linear('Δ°C')))
+    reg.register(AffineUnit("°F", 5.0 / 9.0, 255.3722222222222, TEMPERATURE, delta_unit=reg.get_linear("Δ°F")))
+    reg.register(AffineUnit("°R", 5.0 / 9.0, 0.0, TEMPERATURE, delta_unit=reg.get_linear("Δ°F")))
+    reg.register(AffineUnit('K', 1.0, 0.0, TEMPERATURE, delta_unit=reg.get_linear('ΔK')))
 
     # Common aliases
     reg.register_alias("ohm", "Ω")
