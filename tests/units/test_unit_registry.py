@@ -22,7 +22,7 @@ from quantium.core.dimensions import (
     dim_mul,
     dim_pow,
 )
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit, AffineUnit
 
 
 # We import the module under test once, and access internals we intentionally
@@ -54,10 +54,9 @@ def patched_default(monkeypatch, reg):
 # ---------------------------------------------------------------------------
 
 def test_base_units_present(reg):
-    for sym, dim in [("m", LENGTH), ("kg", MASS), ("s", TIME), ("A", CURRENT), ("K", TEMPERATURE), ("mol", AMOUNT), ("cd", LUMINOUS)]:
+    for sym, dim, utype in [("m", LENGTH, LinearUnit), ("kg", MASS, LinearUnit), ("s", TIME, LinearUnit), ("A", CURRENT, LinearUnit), ("delta_K", TEMPERATURE, LinearUnit), ("K", TEMPERATURE, AffineUnit), ("mol", AMOUNT, LinearUnit), ("cd", LUMINOUS, LinearUnit)]:
         u = reg.get(sym)
-        assert isinstance(u, Unit)
-        assert u.name == sym
+        assert isinstance(u, utype)
         assert u.scale_to_si == pytest.approx(1.0)
         assert u.dim == dim
 
@@ -199,7 +198,7 @@ def test_thread_safe_prefixed_creation(reg):
         t.join()
 
     assert not errs
-    # All returned the exact same Unit object
+    # All returned the exact same LinearUnit object
     first = created[0]
     assert all(u is first for u in created)
     # Registry has exactly one 'km'
@@ -213,7 +212,7 @@ def test_thread_safe_prefixed_creation(reg):
 def test_convenience_functions_use_default_registry(patched_default):
     # register a custom unit through the free function and fetch it back
     ureg = UnitsRegistry()
-    ureg.register(Unit("ft", 0.3048, LENGTH))
+    ureg.register(LinearUnit("ft", 0.3048, LENGTH))
     out = ureg.get("ft")
     assert out.name == "ft"
     assert out.scale_to_si == pytest.approx(0.3048)
@@ -321,7 +320,7 @@ def test_all_derived_units_dimensions_and_scales(reg, sym, dim_expr, scale):
 ])
 def test_time_units_present_and_scaled(reg, sym, seconds):
     u = reg.get(sym)
-    assert isinstance(u, Unit)
+    assert isinstance(u, LinearUnit)
     assert u.dim == TIME
     assert u.scale_to_si == pytest.approx(seconds)
 
@@ -361,7 +360,7 @@ def test_time_units_present_and_scaled(reg, sym, seconds):
 def test_time_aliases_map_to_canonical(reg, alias, canonical):
     u_alias = reg.get(alias)
     u_canon = reg.get(canonical)
-    # Should be the exact same Unit object
+    # Should be the exact same LinearUnit object
     assert u_alias is u_canon
 
 
@@ -423,7 +422,7 @@ def test_seconds_still_prefixable_but_not_month_year(reg):
 def test_get_compound_velocity_and_acceleration(reg):
     u1 = reg.get("m/s**2")             # parser path
     u2 = reg.get("m") / (reg.get("s") ** 2)  # manual composition
-    assert isinstance(u1, Unit)
+    assert isinstance(u1, LinearUnit)
     assert u1.dim == u2.dim
     assert u1.scale_to_si == pytest.approx(u2.scale_to_si)
 
@@ -547,7 +546,7 @@ def test_thread_safety_compound_get(reg):
 
     assert not errs
     # basic sanity: all results are Units with sensible dim/scale
-    assert all(isinstance(u, Unit) for u in outs)
+    assert all(isinstance(u, LinearUnit) for u in outs)
     # verify a couple of expected dims quickly
     assert any(u.dim == dim_div(LENGTH, TIME) for u in outs)        # m/s cases
     assert any(u.dim == dim_pow(TIME, -1) for u in outs)            # 1/s cases
@@ -570,7 +569,7 @@ def test_register_alias_replace_overwrites_existing_symbol(reg):
 
     # After replacement, fetching 'm' should resolve via the alias to the canonical 'mm'
     m_after = reg.get("m")
-    assert m_after is mm                 # exact same Unit object
+    assert m_after is mm                 # exact same LinearUnit object
     assert m_after.scale_to_si == pytest.approx(1e-3)
 
     # And fetching by canonical 'mm' is unchanged
@@ -644,7 +643,7 @@ def test_register_alias_thread_safe_single_mapping(reg):
         t.join()
 
     assert not errs
-    # Alias must resolve to the exact same Unit object as 's'
+    # Alias must resolve to the exact same LinearUnit object as 's'
     assert reg.get("alias_concurrent") is reg.get("s")
 
 # ---------------------------------------------------------------------------
@@ -770,7 +769,7 @@ def test_membership_checks_consider_aliases(reg):
     assert "alias_seconds" in ns
 
 # ---------------------------------------------------------------------------
-# Unit vs. Alias name conflict checks (without replace=True)
+# LinearUnit vs. Alias name conflict checks (without replace=True)
 # ---------------------------------------------------------------------------
 def test_register_unit_conflict_with_existing_alias_raises(reg):
     """
@@ -786,7 +785,7 @@ def test_register_unit_conflict_with_existing_alias_raises(reg):
 
     # 2. Action & Assert: Try to register a *unit* with the exact same name.
     # This should fail because 'my_custom_alias' is already an alias key.
-    new_unit = Unit(alias_name, 1.2345, LENGTH)
+    new_unit = LinearUnit(alias_name, 1.2345, LENGTH)
     with pytest.raises(ValueError):
         reg.register(new_unit)
 
@@ -811,7 +810,7 @@ def test_register_alias_conflict_with_casefolded_unit_name_raises(reg):
     """
     # 1. Arrange: Register a unit with a simple, lowercase name.
     unit_name = "conflict_unit"
-    reg.register(Unit(unit_name, 1.0, LENGTH))
+    reg.register(LinearUnit(unit_name, 1.0, LENGTH))
 
     # Define an alias that is the same as the unit name, but with a different case.
     conflicting_alias = "CONFLICT_UNIT"
@@ -831,7 +830,7 @@ def test_register_alias_conflict_with_normalized_unit_name_raises(reg):
     """
     # 1. Arrange: Register the canonical micro-ampere unit.
     unit_name = "µA"
-    reg.register(Unit(unit_name, 1e-6, LENGTH))
+    reg.register(LinearUnit(unit_name, 1e-6, LENGTH))
 
     # Define an alias that uses the ASCII 'u' fallback for the micro prefix.
     conflicting_alias = "uA"
@@ -852,13 +851,13 @@ def test_register_alias_conflict_with_normalized_unit_name_raises(reg):
 def test_register_rejects_reserved_unit_names(reg, name):
     ref = reg.get("m")
     with pytest.raises(ValueError, match="UnitNamespace attribute/method"):
-        reg.register(Unit(name, 1.0, ref.dim))
+        reg.register(LinearUnit(name, 1.0, ref.dim))
 
 @pytest.mark.parametrize("name", ["define", "__init__", "_reserved_names"])
 def test_register_rejects_reserved_unit_names_even_with_replace(reg, name):
     ref = reg.get("m")
     with pytest.raises(ValueError, match="UnitNamespace attribute/method"):
-        reg.register(Unit(name, 1.0, ref.dim), replace=True)
+        reg.register(LinearUnit(name, 1.0, ref.dim), replace=True)
 
 @pytest.mark.parametrize("alias", [
     # literal/public
@@ -883,7 +882,7 @@ def test_register_alias_rejects_reserved_names_even_with_replace(reg, alias):
 def test_non_reserved_names_still_register_and_alias_ok(reg):
     # Positive control to show normal behavior still works
     ref = reg.get("m")
-    reg.register(Unit("myunit", 201.168, ref.dim))
+    reg.register(LinearUnit("myunit", 201.168, ref.dim))
     assert reg.get("myunit").scale_to_si == pytest.approx(201.168)
 
     reg.register_alias("munyt", "myunit")

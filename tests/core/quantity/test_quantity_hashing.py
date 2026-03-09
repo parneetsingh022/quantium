@@ -1,6 +1,7 @@
 from __future__ import annotations
 from quantium.core.dimensions import LENGTH, MASS
-from quantium.core.quantity import Quantity, Unit
+from quantium.core.quantity import LinearQuantity
+from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as ureg
 from quantium.units import u
 import pytest
@@ -8,11 +9,11 @@ import pytest
 
 def test_as_key_basic():
     """Tests the basic functionality of as_key."""
-    q1 = Quantity(100.0, u.cm) # _mag_si = 1.0
+    q1 = LinearQuantity(100.0, u.cm) # _mag_si = 1.0
     key = q1.as_key()
     assert key == (LENGTH, 1.0)
     
-    q2 = Quantity(5.5, u.g) # _mag_si = 0.0055
+    q2 = LinearQuantity(5.5, u.g) # _mag_si = 0.0055
     key2 = q2.as_key()
     assert key2 == (MASS, 0.0055)
 
@@ -22,9 +23,9 @@ def test_as_key_default_precision_grouping():
     produce the same key.
     """
     # These two are "equal" according to __eq__
-    q1 = Quantity(1.0, u.m)
-    q2 = Quantity(1.0 + 1e-13, u.m) # 1.0000000000001
-    q3 = Quantity(1.0 - 1e-13, u.m) # 0.9999999999999
+    q1 = LinearQuantity(1.0, u.m)
+    q2 = LinearQuantity(1.0 + 1e-13, u.m) # 1.0000000000001
+    q3 = LinearQuantity(1.0 - 1e-13, u.m) # 0.9999999999999
 
     # At precision=12, all should round to 1.0
     key1 = q1.as_key()
@@ -40,8 +41,8 @@ def test_as_key_default_precision_separation():
     Tests that quantities that are *not* "fuzzy equal"
     produce different keys at the default precision.
     """
-    q1 = Quantity(1.0, u.m)
-    q2 = Quantity(1.0 + 1e-9, u.m)  # 1.000000001
+    q1 = LinearQuantity(1.0, u.m)
+    q2 = LinearQuantity(1.0 + 1e-9, u.m)  # 1.000000001
     
     key1 = q1.as_key() # (DIM_LENGTH, 1.0)
     key2 = q2.as_key() # (DIM_LENGTH, 1.000000001)
@@ -52,8 +53,8 @@ def test_as_key_custom_precision():
     """
     Tests that the `precision` argument correctly changes the rounding.
     """
-    q1 = Quantity(1.2345678, u.m)
-    q2 = Quantity(1.2345679, u.m)
+    q1 = LinearQuantity(1.2345678, u.m)
+    q2 = LinearQuantity(1.2345679, u.m)
     
     # At default precision (12), they are different
     key1_default = q1.as_key()
@@ -66,8 +67,8 @@ def test_as_key_custom_precision():
     assert key1_p6 == key2_p6 # These ARE equal
 
     # Test grouping at precision 3
-    q3 = Quantity(1.2341, u.m) # This was 1.2345
-    q4 = Quantity(1.2342, u.m) # This was 1.2346
+    q3 = LinearQuantity(1.2341, u.m) # This was 1.2345
+    q4 = LinearQuantity(1.2342, u.m) # This was 1.2346
 
     key3_p3 = q3.as_key(precision=3) # (DIM_LENGTH, 1.234)
     key4_p3 = q4.as_key(precision=3) # (DIM_LENGTH, 1.234)
@@ -80,8 +81,8 @@ def test_as_key_custom_precision():
 
 def test_as_key_zero_handling():
     """Tests that -0.0 and 0.0 hash to the same key."""
-    q_pos_zero = Quantity(0.0, u.m)
-    q_neg_zero = Quantity(-0.0, u.m)
+    q_pos_zero = LinearQuantity(0.0, u.m)
+    q_neg_zero = LinearQuantity(-0.0, u.m)
     
     # Check their internal values to confirm one is -0.0
     # Note: This behavior depends on the python env, but generally holds
@@ -103,13 +104,13 @@ def test_as_key_in_dictionary():
     counts = {}
     
     # 1.0 m
-    q_m = Quantity(1.0, u.m)
+    q_m = LinearQuantity(1.0, u.m)
     
     # 1.0 m (with FP noise)
-    q_cm_noise = Quantity(100.0000000000001, u.cm)
+    q_cm_noise = LinearQuantity(100.0000000000001, u.cm)
     
     # 1.001 m
-    q_mm = Quantity(1001.0, u.mm)
+    q_mm = LinearQuantity(1001.0, u.mm)
     
     # --- Use default precision (12) ---
     key_m = q_m.as_key()

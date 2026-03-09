@@ -8,7 +8,7 @@ from typing import Tuple, Union, Optional
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from quantium.core.unit import Unit  # <-- Import Unit for type hints
+    from quantium.core.unit import LinearUnit  # <-- Import LinearUnit for type hints
     from quantium.units.registry import UnitsRegistry
 
 # --- Plan node types ------------------------------------------------
@@ -91,12 +91,23 @@ class _UnitExprParser:
     def _parse_name(self) -> Optional[str]:
         self._skip_ws()
         i0 = self.i
-        if i0 < self.n and (self.s[i0].isalpha() or self.s[i0] == '_'):
-            self.i += 1
-            while self.i < self.n and (self.s[self.i].isalnum() or self.s[self.i] == '_'):
+        if i0 >= self.n:
+            return None
+        ch0 = self.s[i0]
+        # allow Unicode letter or underscore as the first character
+        if not (ch0.isalpha() or ch0 == '_'):
+            return None
+
+        self.i += 1
+        # characters allowed after the first one
+        EXTRA_NAME_CHARS = {'°', 'µ', 'Ω', 'Δ'}
+        while self.i < self.n:
+            ch = self.s[self.i]
+            if ch.isalnum() or ch == '_' or ch in EXTRA_NAME_CHARS:
                 self.i += 1
-            return self.s[i0:self.i]
-        return None
+            else:
+                break
+        return self.s[i0:self.i]
 
     def _parse_signed_int(self) -> int:
         self._skip_ws()
@@ -170,21 +181,26 @@ class _UnitExprParser:
         self.i += len(tok)
 
 # ---------------- Evaluation of a plan against a given registry ----------------
-def _eval_plan(plan: Plan, reg: "UnitsRegistry") -> "Unit":  # <-- FIX: Added return type
+def _eval_plan(plan: Plan, reg: "UnitsRegistry") -> "LinearUnit":  # <-- FIX: Added return type
     kind, op1, op2 = plan
 
     if kind == "name":
         if not isinstance(op1, str):
             raise ValueError(f"Malformed 'name' plan (expected str): {plan!r}")
         try:
-            return reg.get(op1)
+            u = reg.get(op1)
+            # Only linear units are valid in algebraic expressions
+            from quantium.core.unit import LinearUnit
+            if not isinstance(u, LinearUnit):
+                raise ValueError(f"Unit '{op1}' is not a linear unit and cannot be used in expressions")
+            return u
         except Exception as e:
             raise ValueError(f"Unknown unit '{op1}': {e}") from None
 
     elif kind == "one":
-        from quantium.core.unit import Unit
+        from quantium.core.unit import LinearUnit
         from quantium.core.dimensions import DIM_0
-        return Unit("1", 1.0, DIM_0)
+        return LinearUnit("1", 1.0, DIM_0)
 
     elif kind == "pow":
         if not isinstance(op1, tuple):
@@ -225,7 +241,7 @@ def _compile_unit_expr(expr: str) -> Plan:
         )
     return _UnitExprParser(expr).parse()
 
-def extract_unit_expr(expr: str, reg: "UnitsRegistry") -> "Unit":  # <-- FIX: Added return type
+def extract_unit_expr(expr: str, reg: "UnitsRegistry") -> "LinearUnit":  # <-- FIX: Added return type
     """
     Fast custom parser for unit expressions like 'kg*m/(nF**2 * s**2)'.
     """

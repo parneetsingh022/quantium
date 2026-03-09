@@ -11,7 +11,8 @@ from quantium.units.registry import UnitsRegistry, DEFAULT_REGISTRY
 from quantium.core.dimensions import (
     LENGTH, TIME, MASS, CURRENT, DIM_0, dim_div, dim_mul, dim_pow
 )
-from quantium.core.quantity import Unit, Quantity
+from quantium.core.quantity import LinearQuantity
+from quantium.core.unit import LinearUnit
 
 
 # --------------------------
@@ -74,7 +75,7 @@ def test_name_with_digit_tail_is_single_token_not_literal_one():
 def test_eval_simple_name_with_default_registry():
     reg = DEFAULT_REGISTRY
     u = extract_unit_expr("m", reg)
-    assert isinstance(u, Unit)
+    assert isinstance(u, LinearUnit)
     assert u.dim == LENGTH
     assert math.isclose(u.scale_to_si, 1.0)
 
@@ -93,9 +94,9 @@ def test_eval_parenthesized_pow():
 def test_eval_left_associative_division():
     # a/b/c == (a/b)/c; use custom registry with atomic 'a','b','c'
     reg = UnitsRegistry()
-    reg.register(Unit("a", 1.0, LENGTH))
-    reg.register(Unit("b", 2.0, TIME))
-    reg.register(Unit("c", 5.0, MASS))
+    reg.register(LinearUnit("a", 1.0, LENGTH))
+    reg.register(LinearUnit("b", 2.0, TIME))
+    reg.register(LinearUnit("c", 5.0, MASS))
     u = extract_unit_expr("a/b/c", reg)
     assert u.dim == dim_div(dim_div(LENGTH, TIME), MASS)
     assert math.isclose(u.scale_to_si, 1.0 / (2.0 * 5.0))
@@ -116,8 +117,8 @@ def test_eval_signed_exponent_negative_scale_and_dims():
 
 def test_eval_large_positive_and_negative_exponents():
     reg = UnitsRegistry()
-    reg.register(Unit("x", 10.0, LENGTH))
-    reg.register(Unit("y", 0.5, TIME))
+    reg.register(LinearUnit("x", 10.0, LENGTH))
+    reg.register(LinearUnit("y", 0.5, TIME))
     u = extract_unit_expr("x**10 / y**-7", reg)
     # x^10 * y^7
     assert u.dim == dim_mul(dim_pow(LENGTH, 10), dim_pow(TIME, 7))
@@ -132,8 +133,8 @@ def test_compile_cache_reuses_plan_but_evaluates_against_each_registry():
     # Two different registries with different factor for 'm'
     reg1 = UnitsRegistry()
     reg2 = UnitsRegistry()
-    reg1.register(Unit("m", 1.0, LENGTH))
-    reg2.register(Unit("m", 2.0, LENGTH))
+    reg1.register(LinearUnit("m", 1.0, LENGTH))
+    reg2.register(LinearUnit("m", 2.0, LENGTH))
 
     # Plan is cached by expression string
     p1 = _compile_unit_expr("m")
@@ -176,9 +177,9 @@ def test_non_prefixable_units_reject_prefix():
 
 def test_quantity_and_unit_roundtrip_repr_and_conversion():
     # 1000 cm/s should print as "1000 cm/s" by default, and "10 m/s" in SI
-    cm = Unit("cm", 0.01, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
     s = DEFAULT_REGISTRY.get("s")
-    v = Quantity(1000, cm / s)
+    v = LinearQuantity(1000, cm / s)
     assert f"{v}" == "1000 cm/s"
     assert f"{v:si}" == "10 m/s"
 
@@ -191,6 +192,6 @@ def test_unit_name_collapse_on_same_unit_multiplication():
 
 def test_one_over_unit_name_formatting():
     s = DEFAULT_REGISTRY.get("s")
-    inv = Unit("1", 1.0, DIM_0) / s   # via Unit.__truediv__
+    inv = LinearUnit("1", 1.0, DIM_0) / s   # via LinearUnit.__truediv__
     assert inv.name == "1/s"  # depending on your formatting path
     assert inv.dim == dim_pow(TIME, -1)

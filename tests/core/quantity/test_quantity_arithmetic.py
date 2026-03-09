@@ -3,7 +3,8 @@ import math
 import pytest
 
 from quantium.core.dimensions import DIM_0, TIME, LENGTH, dim_div, dim_mul
-from quantium.core.quantity import Unit, Quantity
+from quantium.core.quantity import LinearQuantity
+from quantium.core.unit import LinearUnit
 from quantium.units import u
 
 
@@ -12,8 +13,8 @@ from quantium.units import u
 # -------------------------------
 
 def test_add_and_sub_same_dim():
-    m = Unit("m", 1.0, LENGTH)
-    cm = Unit("cm", 0.01, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
     q1 = 1 * m
     q2 = 50 * cm  # 0.5 m
 
@@ -25,13 +26,19 @@ def test_add_and_sub_same_dim():
     assert math.isclose(d._mag_si / d.unit.scale_to_si, 0.5)
 
 def test_add_dim_mismatch_raises():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
     with pytest.raises(TypeError):
         _ = (1 * m) + (1 * s)
 
+def test_sub_dim_mismatch_raises():
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
+    with pytest.raises(TypeError):
+        _ = (1 * m) - (1 * s)
+
 def test_scalar_multiplication_and_division():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q = 2 * m
 
     q2 = q * 3
@@ -44,8 +51,8 @@ def test_scalar_multiplication_and_division():
     assert math.isclose(q4._mag_si / q4.unit.scale_to_si, 1.0)
 
 def test_quantity_times_quantity():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
     q = (2 * m) * (3 * s)  # -> 6 m·s
 
     assert q.dim == dim_mul(LENGTH, TIME)
@@ -53,8 +60,8 @@ def test_quantity_times_quantity():
     assert math.isclose(q._mag_si / q.unit.scale_to_si, 6.0)
 
 def test_quantity_div_quantity():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
     q = (10 * m) / (2 * s)  # -> 5 m/s
 
     assert q.dim == dim_div(LENGTH, TIME)
@@ -62,7 +69,7 @@ def test_quantity_div_quantity():
     assert math.isclose(q._mag_si / q.unit.scale_to_si, 5.0)
 
 def test_scalar_divided_by_quantity():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q = 2 / (2 * m)  # -> 1 (1/m)
 
     assert q.dim == dim_div(DIM_0, LENGTH)
@@ -72,24 +79,24 @@ def test_scalar_divided_by_quantity():
 
 
 # -------------------------------
-# Quantity * Unit
+# LinearQuantity * LinearUnit
 # -------------------------------
 
 def test_quantity_times_unit_basic():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
 
     q = (2 * m) * s  # → 2 m·s
 
-    assert isinstance(q, Quantity)
+    assert isinstance(q, LinearQuantity)
     assert q.dim == dim_mul(LENGTH, TIME)
     assert q.unit.name == "m·s"
     assert math.isclose(q.value, 2.0)
 
 
 def test_quantity_times_unit_with_prefix_does_not_change_numeric_value():
-    cm = Unit("cm", 0.01, LENGTH)
-    m = Unit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
 
     q_cm = 300 * cm   # SI = 3.0 m
     q_m  = 200 * m
@@ -106,8 +113,8 @@ def test_quantity_times_unit_with_prefix_does_not_change_numeric_value():
 
 
 def test_quantity_times_unit_does_not_mutate_original():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
 
     q = 5 * m
     _ = q * s
@@ -118,16 +125,16 @@ def test_quantity_times_unit_does_not_mutate_original():
 
 
 # -------------------------------
-# Quantity / Unit
+# LinearQuantity / LinearUnit
 # -------------------------------
 
 def test_quantity_div_unit_basic():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
 
     q = (10 * m) / s  # → 10 m/s
 
-    assert isinstance(q, Quantity)
+    assert isinstance(q, LinearQuantity)
     assert q.dim == dim_div(LENGTH, TIME)
     assert q.unit.name == "m/s"
     assert math.isclose(q.value, 10.0)
@@ -135,7 +142,7 @@ def test_quantity_div_unit_basic():
 
 def test_quantity_div_unit_dimensionless_normalization():
     """Division by a matching unit collapses to a truly dimensionless result."""
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
 
     q = (7 * m) / m
 
@@ -147,8 +154,8 @@ def test_quantity_div_unit_dimensionless_normalization():
 
 def test_quantity_div_unit_with_prefix_dimensionless_value_is_correct():
     """Prefixed ratios still collapse to a pure, unitless number."""
-    cm = Unit("cm", 0.01, LENGTH)
-    m = Unit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
 
     q = (200 * cm) / m  # 200 cm / 1 m -> 2 (dimensionless)
 
@@ -159,8 +166,8 @@ def test_quantity_div_unit_with_prefix_dimensionless_value_is_correct():
 
 
 def test_quantity_div_unit_does_not_mutate_original():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
 
     q = 12 * m
     _ = q / s
@@ -210,7 +217,7 @@ def test_regression_67_scalar_times_unit_div_unit_precedence():
     """
     Tests the exact failing case from Issue #67.
     1000 * u.cm / u.s was evaluated as (1000 * u.cm) / u.s,
-    and the bug in Quantity.__truediv__(Unit) caused an incorrect value.
+    and the bug in LinearQuantity.__truediv__(LinearUnit) caused an incorrect value.
     """
     cm =  u("cm")
     s =  u("s")
@@ -218,16 +225,16 @@ def test_regression_67_scalar_times_unit_div_unit_precedence():
     # This is evaluated as (1000 * cm) / s
     q = 1000 * cm / s
 
-    assert isinstance(q, Quantity)
+    assert isinstance(q, LinearQuantity)
     assert q.unit.name == "cm/s"
     assert math.isclose(q._mag_si, 10.0)
     assert math.isclose(q.value, 1000.0)
 
 
-@pytest.mark.regression(reason="Issue #67: Fix for Quantity * Unit constructor")
+@pytest.mark.regression(reason="Issue #67: Fix for LinearQuantity * LinearUnit constructor")
 def test_regression_67_quantity_times_unit_uses_value():
     """
-    Explicitly tests that (Quantity) * (Unit) uses self.value, not self._mag_si.
+    Explicitly tests that (LinearQuantity) * (LinearUnit) uses self.value, not self._mag_si.
     """
     cm =  u("cm") # scale 0.01
     m =  u("m")   # scale 1.0
@@ -240,10 +247,10 @@ def test_regression_67_quantity_times_unit_uses_value():
     assert math.isclose(q2.value, 100000.0)
 
 
-@pytest.mark.regression(reason="Issue #67: Fix for Quantity / Unit constructor")
+@pytest.mark.regression(reason="Issue #67: Fix for LinearQuantity / LinearUnit constructor")
 def test_regression_67_quantity_div_unit_uses_value():
     """
-    Explicitly tests that (Quantity) / (Unit) uses self.value, not self._mag_si.
+    Explicitly tests that (LinearQuantity) / (LinearUnit) uses self.value, not self._mag_si.
     """
     cm =  u("cm") # scale 0.01
     s =  u("s")   # scale 1.0
@@ -256,10 +263,10 @@ def test_regression_67_quantity_div_unit_uses_value():
     assert math.isclose(q2.value, 1000.0)
 
 
-@pytest.mark.regression(reason="Bugfix: Quantity * Unit dimensionless path")
+@pytest.mark.regression(reason="Bugfix: LinearQuantity * LinearUnit dimensionless path")
 def test_quantity_times_unit_resulting_in_dimensionless():
     """
-    Tests the `if new_unit.dim == DIM_0:` branch in Quantity.__mul__.
+    Tests the `if new_unit.dim == DIM_0:` branch in LinearQuantity.__mul__.
     Ensures the SI magnitude is calculated correctly and a scale=1 unit is used.
     """
     m = u.m
@@ -299,10 +306,10 @@ def test_quantity_times_unit_resulting_in_dimensionless():
     assert math.isclose(q_final_3.value, 0.1)
 
 
-@pytest.mark.regression(reason="Bugfix: Cover Quantity * Unit dimensionless path")
+@pytest.mark.regression(reason="Bugfix: Cover LinearQuantity * LinearUnit dimensionless path")
 def test_quantity_times_inverse_unit_simple():
     """
-    Explicitly tests the `if new_unit.dim == DIM_0:` branch in Quantity.__mul__
+    Explicitly tests the `if new_unit.dim == DIM_0:` branch in LinearQuantity.__mul__
     with a single simple case to satisfy code coverage.
     """
     m = u("m")
@@ -314,7 +321,7 @@ def test_quantity_times_inverse_unit_simple():
     
     # Test the exact lines from the coverage report
     # new_mag_si = self._mag_si * other.scale_to_si (5.0 * 1.0)
-    # return Quantity(new_mag_si, unit_dimless)
+    # return LinearQuantity(new_mag_si, unit_dimless)
     assert result.dim == DIM_0
     assert result.unit.scale_to_si == 1.0
     assert math.isclose(result._mag_si, 5.0)

@@ -40,7 +40,7 @@ Base SI Units
      - kelvin
      - Temperature (Θ)
      - -
-     - Yes
+     - No
    * - ``mol``
      - mole
      - Amount (N)
@@ -254,4 +254,38 @@ Non-SI Time Units
      - millennium
      - Time
      - ``millennia``
+     - No
+
+
+Temperature Difference Units
+----------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 24 18 30 10
+
+   * - Symbol
+     - Name
+     - Dimension
+     - Aliases
+     - Prefixable?
+   * - ``K``  (*ΔT*)
+     - kelvin difference
+     - Temperature (Θ)
+     - -
+     - No
+   * - ``Δ°C``
+     - celsius degree difference
+     - Temperature (Θ)
+     - ``delta_degC``, ``delta_deg_celsius``, ``delta_celsius``
+     - No
+   * - ``Δ°F``
+     - fahrenheit degree difference
+     - Temperature (Θ)
+     - ``delta_degF``, ``delta_deg_fahrenheit``, ``delta_fahrenheit``
+     - No
+   * - ``Δ°R``
+     - rankine degree difference
+     - Temperature (Θ)
+     - ``delta_degR``, ``delta_deg_rankine``, ``delta_rankine``
      - No

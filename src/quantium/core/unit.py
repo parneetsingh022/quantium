@@ -1,59 +1,167 @@
-"""Core Unit model and helpers.
-
-This module isolates the `Unit` dataclass from `quantium.core.quantity`
-so other modules (such as the units registry) can depend on it without
-triggering circular imports during documentation builds.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
 from math import isclose, isfinite
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable, overload, Union
+from types import NotImplementedType
 
 from quantium.core.dimensions import DIM_0, Dim, dim_div, dim_mul, dim_pow
 from quantium.core.utils import rationalize
 from quantium.io.unit_simplifier import UnitNameSimplifier
+from quantium.errors import AffineTemperatureOperationError
 
 if TYPE_CHECKING:  # pragma: no cover - imported only for type checking
-    from quantium.core.quantity import Quantity
+    from quantium.core.quantity import LinearQuantity, AffineQuantity, Quantity
+    
+
+
+@runtime_checkable
+class Unit(Protocol):
+    name: str
+    dim: Dim
+    # multiplicative scale relative to SI
+    scale_to_si: float
+
+    # Is this unit linear (purely multiplicative) w.r.t. SI?
+    @property
+    def is_linear(self) -> bool: ...
+
+    # Is this a delta (difference) unit? (only meaningful for linear)
+    @property
+    def is_delta(self) -> bool: ...
+
+
+    @property
+    def is_si(self) -> bool: ...
+
+    # # Absolute conversions (apply offset if present)
+    def to_base_abs(self, x: float) -> float: ...
+    def from_base_abs(self, x: float) -> float: ...
+
+    # Delta conversions (no offset)
+    def to_base_delta(self, dx: float) -> float: ...
+    def from_base_delta(self, dx: float) -> float: ...
+
 
 
 @dataclass(frozen=True, slots=True)
-class Unit:
+class LinearUnit(Unit):
     """Representation of a physical unit with dimensional metadata."""
 
     name: str
     scale_to_si: float
     dim: Dim
+    _is_delta : bool = False
+    # by default delta units even with scale=1 (such as delta_degC) are not considered 
+    # as SI quantities, but (delta_degK) should be treated as si for delta temperature quantities
+    _treat_si : bool = False 
 
     def __post_init__(self) -> None:
         if len(self.dim) != 7:
             raise ValueError("dim must be a 7-tuple (L,M,T,I,Θ,N,J)")
         if not (self.scale_to_si > 0 and isfinite(self.scale_to_si)):
             raise ValueError("scale_to_si must be a positive, finite number")
+        
+    def to_base_abs(self, x: float) -> float:
+        """Convert an absolute value in this unit to the SI base unit."""
+        return x * self.scale_to_si
+
+    def from_base_abs(self, x: float) -> float:
+        """Convert an absolute value from the SI base unit to this unit."""
+        return x / self.scale_to_si
+
+    def to_base_delta(self, dx: float) -> float:
+        """Convert a difference (delta) in this unit to the SI base unit."""
+        return dx * self.scale_to_si
+
+    def from_base_delta(self, dx: float) -> float:
+        """Convert a difference (delta) from the SI base unit to this unit."""
+        return dx / self.scale_to_si
+
+    
+    @classmethod
+    def delta(cls, name: str, scale_to_si: float, dim: Dim, treat_si: bool = False) -> LinearUnit:
+        """Factory for delta (difference) units."""
+        return cls(name, scale_to_si, dim, _is_delta=True, _treat_si=treat_si)
+
+    @property
+    def is_linear(self) -> bool:
+        return True
+    
+    @property
+    def is_delta(self) -> bool:
+        return self._is_delta
+    
+    @property
+    def is_si(self) -> bool:
+        if not self.is_delta and self.scale_to_si == 1:
+            return True
+        elif self.is_delta and self.scale_to_si == 1 and self._treat_si:
+            return True
+        
+        return False
+    
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Unit):
+        if not isinstance(other, LinearUnit):
             return NotImplemented
         return (
             self.dim == other.dim
             and isclose(self.scale_to_si, other.scale_to_si, rel_tol=1e-12, abs_tol=0.0)
         )
 
-    def __rmul__(self, value: float) -> "Quantity":
-        from quantium.core.quantity import Quantity
+    def __rmul__(self, other: object) -> "LinearQuantity | LinearUnit | NotImplementedType":
+        from quantium.core.unit import LinearUnit, AffineUnit
+        from quantium.core.quantity import LinearQuantity
 
-        scalar = float(value)
-        if scalar == 0.0:
-            mag_si = 0.0
-            components = UNIT_SIMPLIFIER.unit_symbol_map(self)
-            val, unit = UNIT_SIMPLIFIER.si_to_value_unit(mag_si, self.dim, components)
-            return Quantity(val, unit)
-        return Quantity(scalar, self)
+        # ---- scalar * unit ----
+        if isinstance(other, (int, float)):
+            scalar = float(other)
+            if scalar == 0.0:
+                # produce a quantity with canonicalised zero unit representation
+                mag_si = 0.0
+                components = UNIT_SIMPLIFIER.unit_symbol_map(self)
+                val, unit = UNIT_SIMPLIFIER.si_to_value_unit(mag_si, self.dim, components)
+                return LinearQuantity(val, unit)
+            return LinearQuantity(scalar, self)
 
-    def __mul__(self, other: "Unit") -> "Unit":
+        # ---- unit * unit via reverse dispatch (e.g., K * m when left is AffineUnit returning NotImplemented) ----
+        if isinstance(other, (LinearUnit, AffineUnit)):
+            if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Multiplication')
+
+            new_dim = dim_mul(other.dim, self.dim)
+            new_scale = other.scale_to_si * self.scale_to_si
+
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(other, 0),
+                UNIT_SIMPLIFIER.unit_symbol_map(self, 1),
+            )
+
+            if (
+                new_dim != DIM_0
+                and isclose(new_scale, 1.0, rel_tol=1e-12, abs_tol=0.0)
+                and "1" not in components
+            ):
+                from quantium.core.utils import preferred_symbol_for_dim
+                preferred = preferred_symbol_for_dim(new_dim)
+                if preferred:
+                    return LinearUnit(preferred, 1.0, new_dim)
+
+            new_name = UNIT_SIMPLIFIER.format_unit_components(components)
+            if new_dim == DIM_0:
+                new_name = ""
+            return LinearUnit(new_name, new_scale, new_dim)
+
+        # Returning NotImplemented signals Python to try the reflected operation on the other operand.
+        return NotImplemented
+
+    def __mul__(self, other: "LinearUnit | AffineUnit") -> "LinearUnit":
+
+        if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Multiplication')
+        
         new_dim = dim_mul(self.dim, other.dim)
         new_scale = self.scale_to_si * other.scale_to_si
 
@@ -63,7 +171,7 @@ class Unit:
         ):
             base_name = self.name if self.name else other.name
             new_unit_name = UNIT_SIMPLIFIER.normalize_power_name(f"{base_name}^2")
-            return Unit(new_unit_name, new_scale, new_dim)
+            return LinearUnit(new_unit_name, new_scale, new_dim)
 
         components = UNIT_SIMPLIFIER.combine_symbol_maps(
             UNIT_SIMPLIFIER.unit_symbol_map(self, 0),
@@ -79,14 +187,18 @@ class Unit:
 
             preferred = preferred_symbol_for_dim(new_dim)
             if preferred:
-                return Unit(preferred, 1.0, new_dim)
+                return LinearUnit(preferred, 1.0, new_dim)
 
         new_unit_name = UNIT_SIMPLIFIER.format_unit_components(components)
         if new_dim == DIM_0:
             new_unit_name = ""
-        return Unit(new_unit_name, new_scale, new_dim)
+        return LinearUnit(new_unit_name, new_scale, new_dim)
 
-    def __truediv__(self, other: "Unit") -> "Unit":
+    def __truediv__(self, other: "LinearUnit | AffineUnit") -> "LinearUnit":
+
+        if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Division')
+        
         new_dim = dim_div(self.dim, other.dim)
         new_scale = self.scale_to_si / other.scale_to_si
 
@@ -104,30 +216,67 @@ class Unit:
 
             preferred = preferred_symbol_for_dim(new_dim)
             if preferred:
-                return Unit(preferred, 1.0, new_dim)
+                return LinearUnit(preferred, 1.0, new_dim)
 
         new_unit_name = UNIT_SIMPLIFIER.format_unit_components(components)
         if new_dim == DIM_0:
             new_unit_name = ""
 
-        return Unit(new_unit_name, new_scale, new_dim)
+        return LinearUnit(new_unit_name, new_scale, new_dim)
 
-    def __rtruediv__(self, n: int | float) -> "Unit":
-        if n != 1:
-            raise TypeError(
-                f"Invalid operation: cannot divide {n} by a Unit ({self.name}). "
-                "Only 1/unit (reciprocal) is supported."
+    def __rtruediv__(self, other : "int | float | LinearUnit | AffineUnit") -> "LinearUnit":
+        from quantium.core.unit import LinearUnit, AffineUnit
+        from quantium.core.quantity import Quantity
+
+        if isinstance(other, (int, float)):
+            if other != 1:
+                raise TypeError(
+                    f"Invalid operation: cannot divide {other} by a Unit ({self.name}). "
+                    "Only 1/unit (reciprocal) is supported."
+                )
+            new_dim = dim_div(DIM_0, self.dim)
+            components = UNIT_SIMPLIFIER.scale_symbol_map(
+                UNIT_SIMPLIFIER.unit_symbol_map(self, 0), -1
+            )
+            new_scale = 1 / self.scale_to_si
+            new_name = UNIT_SIMPLIFIER.format_unit_components(components)
+            if new_dim == DIM_0:
+                new_name = ""
+            return LinearUnit(new_name, new_scale, new_dim)
+        
+        # ---- unit / unit reached via reverse dispatch (e.g., K / m) ----
+        if isinstance(other, (LinearUnit, AffineUnit)):
+            # If left is affine, only allow ratio-scale (offset == 0) like K or °R
+            if isinstance(other, AffineUnit) and other.offset_to_si != 0.0:
+                raise AffineTemperatureOperationError('Division')
+
+            # Compute (other / self)
+            new_dim = dim_div(other.dim, self.dim)
+            new_scale = other.scale_to_si / self.scale_to_si
+
+            components = UNIT_SIMPLIFIER.combine_symbol_maps(
+                UNIT_SIMPLIFIER.unit_symbol_map(other, 0),                          # numerator
+                UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(self, 1), -1),  # denominator
             )
 
-        new_dim = dim_div(DIM_0, self.dim)
-        components = UNIT_SIMPLIFIER.scale_symbol_map(UNIT_SIMPLIFIER.unit_symbol_map(self, 0), -1)
-        new_scale = 1 / self.scale_to_si
-        new_name = UNIT_SIMPLIFIER.format_unit_components(components)
-        if new_dim == DIM_0:
-            new_name = ""
-        return Unit(new_name, new_scale, new_dim)
+            if (
+                new_dim != DIM_0
+                and isclose(new_scale, 1.0, rel_tol=1e-12, abs_tol=0.0)
+                and "1" not in components
+            ):
+                from quantium.core.utils import preferred_symbol_for_dim
+                preferred = preferred_symbol_for_dim(new_dim)
+                if preferred:
+                    return LinearUnit(preferred, 1.0, new_dim)
 
-    def __pow__(self, n: int | float | Fraction) -> "Unit":
+            new_name = UNIT_SIMPLIFIER.format_unit_components(components)
+            if new_dim == DIM_0:
+                new_name = ""
+            return LinearUnit(new_name, new_scale, new_dim)
+
+        return NotImplemented
+
+    def __pow__(self, n: int | float | Fraction) -> "LinearUnit":
         if isinstance(n, float):
             n = rationalize(n)
 
@@ -141,9 +290,113 @@ class Unit:
                 normalized_name = ""
 
         new_scale = self.scale_to_si ** n
-        return Unit(normalized_name, new_scale, new_dim)
+        return LinearUnit(normalized_name, new_scale, new_dim)
 
 
-UNIT_SIMPLIFIER = UnitNameSimplifier(Unit)
+@dataclass(frozen=True, slots=True)
+class AffineUnit(Unit):
+    """
+    Affine unit (e.g., degrees Celsius) with scale and offset relative to SI.
 
-__all__ = ["Unit", "UNIT_SIMPLIFIER"]
+    Absolute conversions use both scale and offset:
+      x_SI   = scale_to_si * x + offset_to_si
+      x_unit = (x_SI - offset_to_si) / scale_to_si
+
+    Delta conversions use the provided delta_unit (purely multiplicative).
+
+    Notes:
+      • Affine units are not closed under multiplication/division/power in the
+        usual sense; such algebra should be performed on deltas.
+      • For "delta" temperatures (e.g., Δ°C), use the LinearUnit given in delta_unit.
+    """
+
+    name: str
+    scale_to_si: float
+    offset_to_si: float
+    dim: Dim
+    delta_unit: "LinearUnit"
+
+    def __post_init__(self) -> None:
+        if len(self.dim) != 7:
+            raise ValueError("dim must be a 7-tuple (L,M,T,I,Θ,N,J)")
+        if not (self.scale_to_si > 0 and isfinite(self.scale_to_si)):
+            raise ValueError("scale_to_si must be a positive, finite number")
+        if not isfinite(self.offset_to_si):
+            raise ValueError("offset_to_si must be finite")
+        if not isinstance(self.delta_unit, Unit) or not self.delta_unit.is_linear:
+            raise TypeError("delta_unit must be a LinearUnit")
+
+    # --- Unit protocol ---
+
+    @property
+    def is_linear(self) -> bool:
+        return False
+
+    @property
+    def is_delta(self) -> bool:
+        return False
+    
+    @property
+    def is_si(self) -> bool:
+        # Must be affine (not linear) with no offset and unity scale.
+        if self.scale_to_si != 1.0 or self.offset_to_si != 0.0:
+            return False
+
+        # Delta unit should itself be SI (ΔK)
+        if hasattr(self.delta_unit, "is_si") and self.delta_unit.is_si:
+            return True
+
+        return False
+
+    # Absolute conversions (apply offset)
+    def to_base_abs(self, x: float) -> float:
+        return x * self.scale_to_si + self.offset_to_si
+
+    def from_base_abs(self, x: float) -> float:
+        return (x - self.offset_to_si) / self.scale_to_si
+
+    # Delta conversions delegate to the provided delta_unit
+    def to_base_delta(self, dx: float) -> float:
+        return self.delta_unit.to_base_delta(dx)
+
+    def from_base_delta(self, dx: float) -> float:
+        return self.delta_unit.from_base_delta(dx)
+
+    # --- Equality and representation ---
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AffineUnit):
+            return NotImplemented
+        return (
+            self.dim == other.dim
+            and isclose(self.scale_to_si, other.scale_to_si, rel_tol=1e-12)
+            and isclose(self.offset_to_si, other.offset_to_si, rel_tol=1e-12)
+            and self.delta_unit == other.delta_unit
+        )
+    
+    def __rmul__(self, value: float) -> "AffineQuantity":
+        from quantium.core.quantity import AffineQuantity  # lazy import to avoid cycles
+        scalar = float(value)
+        return AffineQuantity(scalar, self)
+
+    # --- Disallow other algebra on affine *units* (optional but nice) ---
+    def __mul__(self, other: object) -> NotImplementedType:
+        return NotImplemented
+        #raise TypeError("Multiplying affine units is undefined; use delta units for algebra.")
+    def __truediv__(self, other: object) -> "LinearUnit | NotImplementedType":
+        if isinstance(other, AffineUnit) and other.offset_to_si == 0:
+            return LinearUnit("", 1, DIM_0)
+        
+        return NotImplemented
+        #raise TypeError("Dividing affine units is undefined; use delta units for algebra.")
+    def __rtruediv__(self, other: object) -> NotImplementedType:
+        return NotImplemented
+        #raise TypeError("Dividing by an affine unit is undefined; use delta units for algebra.")
+    def __pow__(self, n: int | float | Fraction) -> NotImplementedType:
+        return NotImplemented
+        #raise TypeError("Exponentiating affine units is undefined; use delta units for algebra.")
+
+
+UNIT_SIMPLIFIER = UnitNameSimplifier(LinearUnit)
+
+__all__ = ["Unit", "LinearUnit", "AffineUnit", "UNIT_SIMPLIFIER"]

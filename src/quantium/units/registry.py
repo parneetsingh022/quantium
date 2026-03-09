@@ -16,7 +16,7 @@ Key improvements over the prior design
 
 Assumptions
 -----------
-- `Unit(name: str, scale_to_si: float, dim)` is available from `quantium.core.quantity`.
+- `LinearUnit(name: str, scale_to_si: float, dim)` is available from `quantium.core.quantity`.
 - Dimension arithmetic helpers are in `quantium.core.dimensions`.
 """
 from __future__ import annotations
@@ -41,7 +41,8 @@ from quantium.core.dimensions import (
     dim_mul,
     dim_pow,
 )
-from quantium.core.unit import Unit
+from quantium.core.unit import LinearUnit, AffineUnit, Unit
+from quantium.core.quantity import AffineQuantity
 from quantium.units.parser import extract_unit_expr
 
 
@@ -91,7 +92,7 @@ def normalize_symbol(s: str) -> str:
 # Units registry
 # ---------------------------------------------------------------------------
 class UnitsRegistry:
-    """Thread-safe registry for `Unit` objects with SI prefix synthesis.
+    """Thread-safe registry for `LinearUnit` objects with SI prefix synthesis.
 
     This registry does *not* parse compound expressions (like "m/s^2").
     It focuses on atomic symbols (possibly prefixed). That higher-level
@@ -100,6 +101,7 @@ class UnitsRegistry:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        # Store both Linear and Affine units
         self._units: Dict[str, Unit] = {}
         self._aliases: Dict[str, str] = {}
         self._non_prefixable: set[str] = set()
@@ -121,8 +123,8 @@ class UnitsRegistry:
         return normalize_symbol(symbol) in self._non_prefixable
 
     # -------------------------- public API ---------------------------------
-    def register(self, unit: Unit, replace : bool = False) -> None:
-        """Register (or overwrite if replace is True) a `Unit` under its canonical name.
+    def register(self, unit: LinearUnit | AffineUnit, replace : bool = False) -> None:
+        """Register (or overwrite if replace is True) a `LinearUnit` under its canonical name.
 
         Use `register_alias` to add additional spellings without duplication.
         """
@@ -258,10 +260,11 @@ class UnitsRegistry:
         p, base = self._split_prefix(symbol)
         return p is not None and base in self._units
 
-    def _try_synthesize_prefixed(self, sym: str) -> Optional[Unit]:
+    def _try_synthesize_prefixed(self, sym: str) -> Optional[LinearUnit]:
         # Already registered due to race? (cheap check)
         if sym in self._units:
-            return self._units[sym]
+            existing = self._units[sym]
+            return existing if isinstance(existing, LinearUnit) else None
 
         prefix, base_sym = self._split_prefix(sym)
         if prefix is None or not base_sym:
@@ -269,6 +272,9 @@ class UnitsRegistry:
 
         base = self._units.get(base_sym)
         if base is None:
+            return None
+        # Only linear units are prefixable
+        if not isinstance(base, LinearUnit):
             return None
 
         # Prevent stacked prefixes: base itself must not be prefixed
@@ -279,9 +285,16 @@ class UnitsRegistry:
             return None
 
         factor = _PREFIX_FACTORS[prefix]
-        new_unit = Unit(sym, base.scale_to_si * factor, base.dim)
+        new_unit = LinearUnit(sym, base.scale_to_si * factor, base.dim)
         self._units[sym] = new_unit
         return new_unit
+
+    # Helper for callers that explicitly need a LinearUnit
+    def get_linear(self, symbol: str) -> LinearUnit:
+        u = self.get(symbol)
+        if not isinstance(u, LinearUnit):
+            raise TypeError(f"Requested linear unit for '{symbol}', but found non-linear (affine) unit")
+        return u
     
 
 class UnitNamespace:
@@ -293,14 +306,14 @@ class UnitNamespace:
     def __contains__(self, spec: str) -> bool:
         return self._reg.has(spec)
 
-    def define(self, expr : str, scale : "float|int", reference : "Unit", replace : bool = False) -> None:
+    def define(self, expr : str, scale : "float|int", reference : "LinearUnit", replace : bool = False) -> None:
         if expr in getattr(UnitNamespace, "_reserved_names", ()):
             raise ValueError(
                 f"Cannot define unit '{expr}': "
                 "name conflicts with UnitNamespace attribute/method."
             )
         
-        self._reg.register(Unit(expr, float(scale) * reference.scale_to_si , reference.dim), replace)
+        self._reg.register(LinearUnit(expr, float(scale) * reference.scale_to_si , reference.dim), replace)
 
     def __call__(self, spec : "str") -> "Unit":
         return self._reg.get(spec)
@@ -341,19 +354,18 @@ def _bootstrap_default_registry() -> UnitsRegistry:
 
     # Base SI units
     base_units = (
-        Unit("m",   1.0, LENGTH),       # length
-        Unit("kg",  1.0, MASS),         # mass
-        Unit("s",   1.0, TIME),         # time
-        Unit("A",   1.0, CURRENT),      # electric current
-        Unit("K",   1.0, TEMPERATURE),  # temperature
-        Unit("mol", 1.0, AMOUNT),       # amount of substance
-        Unit("cd",  1.0, LUMINOUS),     # luminous intensity
+        LinearUnit("m",   1.0, LENGTH),       # length
+        LinearUnit("kg",  1.0, MASS),         # mass
+        LinearUnit("s",   1.0, TIME),         # time
+        LinearUnit("A",   1.0, CURRENT),      # electric current
+        LinearUnit("mol", 1.0, AMOUNT),       # amount of substance
+        LinearUnit("cd",  1.0, LUMINOUS),     # luminous intensity
     )
 
     # Named, dimensionless
     derived_named = (
-        Unit("rad", 1.0, DIM_0),
-        Unit("sr",  1.0, DIM_0),
+        LinearUnit("rad", 1.0, DIM_0),
+        LinearUnit("sr",  1.0, DIM_0),
     )
 
     # --- Helpful composite dimensions (readable + reuse) ---
@@ -426,9 +438,21 @@ def _bootstrap_default_registry() -> UnitsRegistry:
     for u in derived_named:
         reg.register(u)
     for sym, scale, dim in derived_units:
-        reg.register(Unit(sym, scale, dim))
+        reg.register(LinearUnit(sym, scale, dim))
     for sym, scale, dim in time_units:
-        reg.register(Unit(sym, scale, dim))
+        reg.register(LinearUnit(sym, scale, dim))
+    
+    # Temperature Delta Units
+    reg.register(LinearUnit.delta('ΔK', 1.0, TEMPERATURE, treat_si=True))
+    reg.register(LinearUnit.delta('Δ°C', 1, TEMPERATURE))
+    reg.register(LinearUnit.delta('Δ°F', 5/9, TEMPERATURE))
+    reg.register(LinearUnit.delta("Δ°R", 5/9, TEMPERATURE))
+
+    # Temperature Units
+    reg.register(AffineUnit('°C', 1,  273.15, TEMPERATURE, delta_unit=reg.get_linear('Δ°C')))
+    reg.register(AffineUnit("°F", 5.0 / 9.0, 255.3722222222222, TEMPERATURE, delta_unit=reg.get_linear("Δ°F")))
+    reg.register(AffineUnit("°R", 5.0 / 9.0, 0.0, TEMPERATURE, delta_unit=reg.get_linear("Δ°F")))
+    reg.register(AffineUnit('K', 1.0, 0.0, TEMPERATURE, delta_unit=reg.get_linear('ΔK')))
 
     # Common aliases
     reg.register_alias("ohm", "Ω")
@@ -458,11 +482,47 @@ def _bootstrap_default_registry() -> UnitsRegistry:
     reg.register_alias("millennia", "millennium")
 
 
+    # Delta Temperature aliases
+    reg.register_alias("delta_degC", "Δ°C")
+    reg.register_alias("delta_deg_celsius", "Δ°C")
+    reg.register_alias("delta_celsius", "Δ°C")
+    
+    reg.register_alias("delta_degF", "Δ°F")
+    reg.register_alias("delta_deg_fahrenheit", "Δ°F")
+    reg.register_alias("delta_fahrenheit", "Δ°F")
+
+    reg.register_alias("delta_degR", "Δ°R")
+    reg.register_alias("delta_deg_rankine", "Δ°R")
+    reg.register_alias("delta_rankine", "Δ°R")
+
+
+    # Temperature aliases
+    reg.register_alias("degC", "°C")
+    reg.register_alias("deg_celsius", "°C")
+    reg.register_alias("celsius", "°C")
+    
+    reg.register_alias("degF", "°F")
+    reg.register_alias("deg_fahrenheit", "°F")
+    reg.register_alias("fahrenheit", "°F")
+
+    reg.register_alias("degR", "°R")
+    reg.register_alias("deg_rankine", "°R")
+    reg.register_alias("rankine", "°R")
+
+    reg.register_alias("delta_K", "ΔK")
+    reg.register_alias("delta_k", "ΔK")
+    reg.register_alias("delta_kelvin", "ΔK")
+    reg.register_alias("kelvin", "K")
+
+
+
     reg.set_non_prefixable([
         "kg",
         "min", "h", "d", "wk", "fortnight",
         "mo", "yr", "yr_julian",
         "decade", "century", "millennium",
+        "Δ°C", "Δ°F", "Δ°R", "ΔK",
+        "K", "R"
     ])
 
     return reg

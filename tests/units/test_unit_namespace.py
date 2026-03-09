@@ -4,7 +4,7 @@ import pytest
 
 import quantium.units.registry as regmod
 from quantium.units.registry import UnitsRegistry, UnitNamespace
-from quantium.core.quantity import Unit  # your Unit class
+from quantium.core.unit import LinearUnit  # your LinearUnit class
 from quantium.core.dimensions import dim_div
 from quantium.units.registry import _bootstrap_default_registry
 
@@ -30,7 +30,7 @@ def test_import_u_from_quantium(monkeypatch, reg):
     assert hasattr(u, "_reg")
     assert u._reg is reg  # should wrap the patched registry
 
-    # Sanity check: using u returns real Unit objects
+    # Sanity check: using u returns real LinearUnit objects
     m = u.m
     s = u.s
     assert m.name == "m"
@@ -59,13 +59,13 @@ def ns(reg):
 def test_namespace_call_returns_unit(ns, reg):
     u1 = ns("m")
     u2 = reg.get("m")
-    assert isinstance(u1, Unit)
+    assert isinstance(u1, LinearUnit)
     assert u1 is u2
 
 def test_namespace_getattr_returns_unit(ns, reg):
     u1 = ns.kg
     u2 = reg.get("kg")
-    assert isinstance(u1, Unit)
+    assert isinstance(u1, LinearUnit)
     assert u1 is u2
 
 def test_namespace_access_styles_equivalent(ns):
@@ -111,7 +111,7 @@ def test_namespace_call_unknown_raises_valueerror(ns):
 
 def test_namespace_dir_includes_registered_symbols(ns, reg):
     # register a custom unit and an alias to see them in dir()
-    reg.register(Unit("ft", 0.3048, reg.get("m").dim))
+    reg.register(LinearUnit("ft", 0.3048, reg.get("m").dim))
     reg.register_alias("foot", "ft")
 
     names = dir(ns)
@@ -164,9 +164,9 @@ def test_registry_blocks_reserved_name_on_register():
     reg = _bootstrap_default_registry()
     u = reg.as_namespace()
     # Try to register directly via the registry (bypassing UnitNamespace.define)
-    from quantium.core.quantity import Unit
+    from quantium.core.unit import LinearUnit
     with pytest.raises(ValueError, match="UnitNamespace"):
-        reg.register(Unit("define", 1.0, u.m.dim))
+        reg.register(LinearUnit("define", 1.0, u.m.dim))
 
 def test_registry_blocks_reserved_name_on_alias():
     reg = _bootstrap_default_registry()

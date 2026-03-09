@@ -10,7 +10,7 @@ from quantium.units.registry import DEFAULT_REGISTRY as ureg
 # -------------------------------
 # Reciprocal test for units
 # -------------------------------
-@pytest.mark.regression(reason="Issue #19: Unit division with 1 error + edge cases")
+@pytest.mark.regression(reason="Issue #19: LinearUnit division with 1 error + edge cases")
 def test_unit_reciprocal():
     s = ureg.get("s")
 

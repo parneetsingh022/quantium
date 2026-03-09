@@ -1,21 +1,25 @@
 import math
 import pytest
-from quantium.core.dimensions import LENGTH, TEMPERATURE,TIME, DIM_0
-from quantium.core.quantity import Quantity, Unit
+import operator
+
+
+from quantium.core.dimensions import LENGTH, TIME, TEMPERATURE, DIM_0
+from quantium.core.quantity import LinearQuantity
+from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as dreg
 from quantium.units import u
 # -------------------------------
-# Quantity: basics & conversion
+# LinearQuantity: basics & conversion
 # -------------------------------
 
 def test_quantity_construct_and_to():
-    m  = Unit("m", 1.0, LENGTH)
-    cm = Unit("cm", 0.01, LENGTH)
+    m  = LinearUnit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
 
-    q_cm = Quantity(200, cm)          # 200 cm
+    q_cm = LinearQuantity(200, cm)          # 200 cm
     q_m  = q_cm.to(m)                  # -> 2 m
 
-    assert isinstance(q_m, Quantity)
+    assert isinstance(q_m, LinearQuantity)
     assert q_m.unit == m
     assert q_m.dim == LENGTH
     # _mag_si is internal, so check using units:
@@ -24,21 +28,21 @@ def test_quantity_construct_and_to():
     assert math.isclose(q_m._mag_si / q_m.unit.scale_to_si, 2.0)
 
 def test_quantity_to_dimension_mismatch_raises():
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TEMPERATURE)
-    q = Quantity(3, m)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
+    q = LinearQuantity(3, m)
     with pytest.raises(TypeError):
         q.to(s)
 
 
 # -------------------------------
-# __rmatmul__: value * Unit
+# __rmatmul__: value * LinearUnit
 # -------------------------------
 
 def test_rmatmul_operator():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q = 3 * m
-    assert isinstance(q, Quantity)
+    assert isinstance(q, LinearQuantity)
     assert q.dim == LENGTH
     assert q.unit is m
     assert math.isclose(q._mag_si, 3.0)
@@ -48,7 +52,7 @@ def test_rmatmul_operator():
 # ----------------------------
 # Helpers
 # ----------------------------
-def shown(q: Quantity) -> float:
+def shown(q: LinearQuantity) -> float:
     """Return the magnitude shown in q's current unit (not SI)."""
     return q._mag_si / q.unit.scale_to_si
 
@@ -114,7 +118,7 @@ def test_to_string_parentheses_and_mixed_ops():
 
 def test_to_string_with_micro_alias_in_denominator():
     # 1 / ms -> 1000 1/s (Hz dimension), using 'ms' in target string
-    q = 1 * (1 / dreg.get("ms"))  # Quantity with T^-1
+    q = 1 * (1 / dreg.get("ms"))  # LinearQuantity with T^-1
     out = q.to("1/s")
     assert math.isclose(shown(out), 1000.0)
     assert out.dim == q.dim
@@ -138,9 +142,9 @@ def test_to_physically_equivalent_different_name():
     Tests the bug fix: converting to a unit that is physically
     identical but has a different name should return a NEW object.
     """
-    q1 = Quantity(5.0, u.W/(u.A*u.m))  # 5.0 W/(A·m)
+    q1 = LinearQuantity(5.0, u.W/(u.A*u.m))  # 5.0 W/(A·m)
 
-    # Test conversion using a Unit object
+    # Test conversion using a LinearUnit object
     q2 = q1.to(u.V/u.m)            # Convert to V/m
 
     # 1. Check physical equivalence (value is the same)
@@ -168,9 +172,9 @@ def test_to_identical_name_optimization():
     Tests the optimization path: converting to the *exact same unit*
     (identical name) should return the SAME object (`self`).
     """
-    q1 = Quantity(10.0, u.V/u.m)  # 10.0 V/m
+    q1 = LinearQuantity(10.0, u.V/u.m)  # 10.0 V/m
 
-    # Test conversion using the *same* Unit object
+    # Test conversion using the *same* LinearUnit object
     q2 = q1.to(u.V/u.m)
 
     # Check that it returned the *exact same object*
@@ -189,7 +193,7 @@ def test_to_identical_name_optimization():
 # ----------------------------
 
 def test_to_string_identity_fast_path_returns_same_object():
-    # .to("m") on a Quantity already in meters should return self
+    # .to("m") on a LinearQuantity already in meters should return self
     q = 2.5 * dreg.get("m")
     r = q.to("m")
     assert r is q
@@ -260,7 +264,7 @@ def test_quantity_value_property():
     q_cm = 200 * u.cm
     assert math.isclose(q_cm.value, 200.0)
 
-    # 3. Quantity after conversion
+    # 3. LinearQuantity after conversion
     # 200 cm -> 2 m
     q_m_converted = q_cm.to(u.m)
     assert math.isclose(q_m_converted.value, 2.0)
@@ -290,3 +294,130 @@ def test_quantity_value_property():
     # correctly returns NotImplemented.
     with pytest.raises(TypeError, match="unsupported operand type"):
         _ = 1 + LENGTH
+
+
+# defensive guard when parser doesn't return a LinearUnit ---
+def test_to_parser_returns_non_linearunit_triggers_guard(monkeypatch):
+    """
+    If the unit parser returns something that is NOT a LinearUnit
+    (e.g., future AffineUnit or a bug), .to(...) should raise the
+    defensive TypeError.
+    """
+    import quantium.core.quantity as qmod  # module under test
+
+    class NotAUnit:
+        pass
+
+    # Patch the *bound* name used by LinearQuantity.to(...)
+    monkeypatch.setattr(qmod, "extract_unit_expr", lambda s, reg: NotAUnit())
+
+    q = 1 * dreg.get("m")
+    with pytest.raises(TypeError, match="did not resolve to a LinearUnit"):
+        _ = q.to("anything")  # string won’t be parsed; our patch returns NotAUnit
+
+
+# ----------------------------
+# _check_dim_compatible(): compare to 0
+# ----------------------------
+
+def test_compare_dimensioned_quantity_to_zero_raises_typeerror():
+    q = 3 * u.m  # dimensioned
+    for op in (operator.lt, operator.le, operator.gt, operator.ge):
+        with pytest.raises(TypeError, match="Cannot compare a dimensioned quantity to 0"):
+            _ = op(q, 0)  # q < 0, q <= 0, q > 0, q >= 0
+
+def test_compare_dimensionless_quantity_to_zero_is_allowed():
+    q = (10 * u.s) / (5 * u.s)  # dimensionless (== 2)
+    assert q.dim == DIM_0
+
+    # Should NOT raise; comparisons should behave numerically vs 0
+    assert (q > 0) is True
+    assert (q >= 0) is True
+    assert (q < 0) is False
+    assert (q <= 0) is False
+
+# ----------------------------
+# _check_dim_compatible(): wrong-type operand
+# ----------------------------
+
+def test_compare_with_non_quantity_non_number_raises_typeerror():
+    q = 1 * u.m
+    # Use a comparison that triggers _check_dim_compatible (not __eq__)
+    with pytest.raises(TypeError) as excinfo:
+        _ = q < "oops"
+    # Message should include the offending type
+    assert "Cannot compare LinearQuantity with type" in str(excinfo.value)
+    assert "str" in str(excinfo.value)
+
+
+# ----------------------------
+# Delta temperature units: Δ°C, Δ°F, Δ°R
+# ----------------------------
+
+def test_delta_c_to_delta_kelvin():
+    # 10 Δ°C == 10 K (no offset for deltas)
+    q = 10 * u("Δ°C")
+    out = q.to("delta_k")
+    assert math.isclose(shown(out), 10.0)
+    assert out.dim == q.dim
+
+def test_delta_f_to_delta_kelvin():
+    # 18 Δ°F == 10 K  (scale 5/9)
+    q = 18 * u("Δ°F")
+    out = q.to("delta_K")
+    assert math.isclose(shown(out), 10.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+
+def test_delta_r_to_delta_kelvin():
+    # 9 Δ°R == 5 K  (scale 5/9)
+    q = 9 * u("Δ°R")
+    out = q.to("delta_K")
+    assert math.isclose(shown(out), 5.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+
+def test_delta_c_to_delta_f():
+    # 25 Δ°C == 45 Δ°F
+    q = 25 * u("Δ°C")
+    out = q.to("Δ°F")
+    assert math.isclose(shown(out), 45.0, rel_tol=1e-12)
+    assert out.dim == q.dim
+    assert out.unit.name == "Δ°F"
+
+def test_delta_f_to_delta_c_roundtrip_precision():
+    # 123 Δ°F -> Δ°C -> Δ°F should match (within tight tolerance)
+    q = 123 * u("Δ°F")
+    c = q.to("Δ°C")
+    f = c.to("Δ°F")
+    assert math.isclose(shown(f), 123.0, rel_tol=1e-12, abs_tol=0.0)
+
+def test_delta_r_to_delta_c_and_f():
+    # 18 Δ°R == 10 Δ°C == 18 Δ°R; also Δ°F should be 18 * (5/9)*9/5 == 10 Δ°F? Nope.
+    # Better: 10 Δ°C == 18 Δ°R and 10 Δ°C == 18 Δ°F /? Wait:
+    # Relationship: 1 Δ°C = 1 K; 1 Δ°F = 5/9 K; 1 Δ°R = 5/9 K.
+    # So 18 Δ°R -> K = 18*(5/9)=10 K -> Δ°C = 10; -> Δ°F = 10*(9/5)=18.
+    q = 18 * u("Δ°R")
+    to_c = q.to("Δ°C")
+    to_f = q.to("Δ°F")
+    assert math.isclose(shown(to_c), 10.0, rel_tol=1e-12)
+    assert math.isclose(shown(to_f), 18.0, rel_tol=1e-12)
+
+def test_delta_addition_across_units_uses_si_and_returns_left_unit():
+    # 5 Δ°C + 9 Δ°R: 9 Δ°R = 9*(5/9)=5 K; 5 Δ°C = 5 K → sum = 10 K
+    # Should return in the left operand's unit (Δ°C) with value 10.
+    q1 = 5 * u("Δ°C")
+    q2 = 9 * u("Δ°R")
+    s = q1 + q2
+    assert s.unit.name == "Δ°C"
+    assert math.isclose(shown(s), 10.0, rel_tol=1e-12)
+
+def test_delta_string_conversion_parsing_symbols():
+    # Ensure the parser resolves the unicode “Δ” names
+    q = 12.5 * u("Δ°F")
+    out = q.to("Δ°C")
+    # 12.5 Δ°F -> K = 12.5*(5/9)= 6.944444..., so Δ°C = same numeric as K
+    assert math.isclose(shown(out), 12.5 * (5/9), rel_tol=1e-12)
+
+def test_delta_units_keep_temperature_dimension():
+    for sym in ("Δ°C", "Δ°F", "Δ°R"):
+        q = 1 * u(sym)
+        assert q.dim == TEMPERATURE

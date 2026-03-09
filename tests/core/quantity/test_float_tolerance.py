@@ -1,7 +1,7 @@
 import pytest
 
 from quantium.core.dimensions import DIM_0, LENGTH, dim_pow
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit
 
 # NOTE:
 # These tests rely on the classic binary rounding facts:
@@ -10,21 +10,21 @@ from quantium.core.quantity import Unit
 # so exact float equality will fail. The library should tolerate tiny drift.
 
 
-@pytest.mark.regression(reason="Float drift: Unit equality should tolerate tiny scale differences")
+@pytest.mark.regression(reason="Float drift: LinearUnit equality should tolerate tiny scale differences")
 def test_unit_equality_tolerates_scale_float_drift():
     # Two mathematically identical scales obtained via different FP paths.
-    u1 = Unit("a", 0.1, LENGTH) * Unit("b", 0.2, LENGTH)     # scale ~ 0.020000000000000004
-    u2 = Unit("c", 0.02, dim_pow(LENGTH, 2))                  # scale 0.02
+    u1 = LinearUnit("a", 0.1, LENGTH) * LinearUnit("b", 0.2, LENGTH)     # scale ~ 0.020000000000000004
+    u2 = LinearUnit("c", 0.02, dim_pow(LENGTH, 2))                  # scale 0.02
 
-    # If Unit.__eq__ uses exact float equality, this will fail.
+    # If LinearUnit.__eq__ uses exact float equality, this will fail.
     # After fixing, __eq__ should consider them equal (same dim, scales within tolerance).
     assert u1 == u2, f"scales differ slightly: {u1.scale_to_si} vs {u2.scale_to_si}"
 
 
-@pytest.mark.regression(reason="Float drift: Quantity equality should use tolerant SI magnitude comparison")
+@pytest.mark.regression(reason="Float drift: LinearQuantity equality should use tolerant SI magnitude comparison")
 def test_quantity_equality_tolerates_si_float_drift():
-    m = Unit("m", 1.0, LENGTH)
-    a = Unit("a", 0.1, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
+    a = LinearUnit("a", 0.1, LENGTH)
 
     q1 = 3 * a      # _mag_si ~ 0.30000000000000004
     q2 = 0.3 * m    # _mag_si ~ 0.29999999999999999
@@ -35,8 +35,8 @@ def test_quantity_equality_tolerates_si_float_drift():
 
 @pytest.mark.regression(reason="Float drift: Dimensionless ratios should be numerically 1 within tolerance")
 def test_dimensionless_ratio_avoids_float_drift():
-    m = Unit("m", 1.0, LENGTH)
-    a = Unit("a", 0.1, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
+    a = LinearUnit("a", 0.1, LENGTH)
 
     num = 3 * a       # SI ~ 0.30000000000000004
     den = 0.3 * m     # SI ~ 0.29999999999999999

@@ -10,7 +10,7 @@ from quantium.core.dimensions import (
     dim_div,
     dim_pow
 )
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit
 
 
 # -------------------------------
@@ -19,8 +19,8 @@ from quantium.core.quantity import Unit
 
 def test_unit_mul_equivalent_names_collapses_to_power_prefers_lhs_name():
     """K * kelvin (same dim, same scale) collapses to a squared head, not 'K·kelvin'."""
-    K = Unit("K", 1.0, TEMPERATURE)
-    kelvin = Unit("kelvin", 1.0, TEMPERATURE)
+    K = LinearUnit("K", 1.0, TEMPERATURE)
+    kelvin = LinearUnit("kelvin", 1.0, TEMPERATURE)
 
     out1 = K * kelvin
     out2 = kelvin * K
@@ -44,8 +44,8 @@ def test_unit_mul_equivalent_names_collapses_to_power_prefers_lhs_name():
 
 def test_unit_mul_non_equivalent_names_composes_normally():
     """m * s composes with a dot and correct scale & dimension."""
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
 
     out = m * s
 
@@ -61,8 +61,8 @@ def test_unit_mul_non_equivalent_names_composes_normally():
 
 def test_unit_div_equivalent_is_dimensionless_even_if_name_not_normalized():
     """K / kelvin is DIM_0 with scale 1; name may or may not be normalized."""
-    K = Unit("K", 1.0, TEMPERATURE)
-    kelvin = Unit("kelvin", 1.0, TEMPERATURE)
+    K = LinearUnit("K", 1.0, TEMPERATURE)
+    kelvin = LinearUnit("kelvin", 1.0, TEMPERATURE)
 
     out1 = K / kelvin
     out2 = kelvin / K
@@ -72,7 +72,7 @@ def test_unit_div_equivalent_is_dimensionless_even_if_name_not_normalized():
     assert math.isclose(out1.scale_to_si, 1.0)
     assert math.isclose(out2.scale_to_si, 1.0)
 
-    # Current Unit.__truediv__ may leave a composed name (e.g., "K/kelvin").
+    # Current LinearUnit.__truediv__ may leave a composed name (e.g., "K/kelvin").
     # Accept either normalized or raw composed names.
     assert out1.name in ""
     assert out2.name in ""
@@ -80,8 +80,8 @@ def test_unit_div_equivalent_is_dimensionless_even_if_name_not_normalized():
 
 def test_unit_div_non_equivalent_builds_fraction_name_and_scale():
     """cm / m should retain correct dimension and scale (0.01) and a composed name."""
-    cm = Unit("cm", 0.01, LENGTH)
-    m = Unit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
 
     out = cm / m
 
@@ -97,7 +97,7 @@ def test_unit_div_non_equivalent_builds_fraction_name_and_scale():
 
 def test_unit_pow_name_normalization_and_scale():
     """Check x^0 -> '1', x^1 -> 'x', x^2 -> 'x^2' with correct scales/dims."""
-    s = Unit("s", 1.0, TIME)
+    s = LinearUnit("s", 1.0, TIME)
 
     s0 = s ** 0
     s1 = s ** 1
@@ -127,10 +127,10 @@ def test_unit_pow_name_normalization_and_scale():
 def test_unit_reciprocal_with_rtruediv_normalizes_power():
     """1 / (s^-3) -> s^3, and 1 / s -> s^-1."""
     # Build s^-3 directly using dim_pow for clarity
-    s_neg3 = Unit("s^-3", 1.0, dim_pow(TIME, -3))
+    s_neg3 = LinearUnit("s^-3", 1.0, dim_pow(TIME, -3))
 
     one_over_sneg3 = 1 / s_neg3
-    s = Unit("s", 1.0, TIME)
+    s = LinearUnit("s", 1.0, TIME)
     one_over_s = 1 / s
 
     # (T^-(-3)) = T^3
@@ -146,13 +146,13 @@ def test_unit_reciprocal_with_rtruediv_normalizes_power():
     
 
 # -------------------------------
-# Smoke: rmatmul creates a Quantity with the right unit
+# Smoke: rmatmul creates a LinearQuantity with the right unit
 # -------------------------------
 
 def test_unit_rmatmul_creates_quantity_with_unit():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q = 5 * m
-    from quantium.core.quantity import Quantity
-    assert isinstance(q, Quantity)
+    from quantium.core.quantity import LinearQuantity
+    assert isinstance(q, LinearQuantity)
     assert q.unit is m
     assert math.isclose(q._mag_si, 5.0)

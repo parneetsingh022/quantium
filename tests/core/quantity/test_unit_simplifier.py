@@ -1,17 +1,17 @@
 import pytest
 
 from quantium.core.dimensions import DIM_0, TIME, LENGTH, MASS, CURRENT, LUMINOUS, dim_div, dim_mul, dim_pow
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit
 from quantium.io.unit_simplifier import UnitNameSimplifier
 from quantium.units.registry import DEFAULT_REGISTRY
 from fractions import Fraction
 
 
-UNIT_SIMPLIFIER = UnitNameSimplifier(Unit)
+UNIT_SIMPLIFIER = UnitNameSimplifier(LinearUnit)
 
 @pytest.fixture(scope="module")
 def simplifier() -> UnitNameSimplifier:
-    return UnitNameSimplifier(Unit)
+    return UnitNameSimplifier(LinearUnit)
 
 
 def test_canonical_unit_for_dim_prefers_registered_symbol(simplifier: UnitNameSimplifier):
@@ -307,7 +307,7 @@ def test_preferred_power_collapse_positive_power_from_components():
     )
 
     assert unit.dim == dim_area
-    # Name normalization for Unit ** 2 should yield an 'm^2'-like form
+    # Name normalization for LinearUnit ** 2 should yield an 'm^2'-like form
     assert unit.scale_to_si == pytest.approx(1.0)
     assert value == pytest.approx(12.5)
     # Keep this loose since your formatter may use superscripts; but the base should be 'm'

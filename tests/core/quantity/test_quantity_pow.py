@@ -3,7 +3,7 @@ import math
 import pytest
 
 from quantium.core.dimensions import DIM_0, LENGTH, TEMPERATURE, dim_div, dim_mul, dim_pow
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit
 from quantium.units import u
 
 def _name(sym: str, n: int) -> str:
@@ -16,7 +16,7 @@ def _name(sym: str, n: int) -> str:
     return f"1/{sym}^{abs(n)}"
 
 def test_power_of_quantity():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q2 = (2 * m) ** 2  # -> 4 m^2
 
     assert q2.dim == dim_pow(LENGTH, 2)
@@ -24,9 +24,9 @@ def test_power_of_quantity():
     assert math.isclose(q2._mag_si / q2.unit.scale_to_si, 4.0)
 
 
-@pytest.mark.regression(reason="Issue: #33 Unit raised to power 0 is not dimensionless")
+@pytest.mark.regression(reason="Issue: #33 LinearUnit raised to power 0 is not dimensionless")
 def test_quantity_pow_zero_and_one_and_negative():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     q = 2 * m
     q0 = q ** 0
     q1 = q ** 1
@@ -40,7 +40,7 @@ def test_quantity_pow_zero_and_one_and_negative():
 @pytest.mark.parametrize("n", [-3, -4])
 @pytest.mark.parametrize("sym, scale", [("m", 1.0), ("cm", 0.01)])
 def test_unit_pow_negative_high_exponents_regression_issue_33(sym: str, scale: float, n: int):
-    u = Unit(sym, scale, LENGTH)
+    u = LinearUnit(sym, scale, LENGTH)
     up = u ** n
 
     # Dimension and name
@@ -55,17 +55,17 @@ def test_unit_pow_negative_high_exponents_regression_issue_33(sym: str, scale: f
 
 
 # -------------------------
-# Regression: Issue #33 (Quantity)
+# Regression: Issue #33 (LinearQuantity)
 # -------------------------
 
-@pytest.mark.regression(reason="Issue #33: Quantity ** n must match dim, unit, and magnitude for negative exponents")
+@pytest.mark.regression(reason="Issue #33: LinearQuantity ** n must match dim, unit, and magnitude for negative exponents")
 @pytest.mark.parametrize("n", [-3, -4])
 @pytest.mark.parametrize("sym, scale, value", [
     ("m",  1.0,  2.0),
     ("cm", 0.01, 5.0),
 ])
 def test_quantity_pow_negative_high_exponents_regression_issue_33(sym: str, scale: float, value: float, n: int):
-    u = Unit(sym, scale, LENGTH)
+    u = LinearUnit(sym, scale, LENGTH)
     q = value * u
     qp = q ** n
 

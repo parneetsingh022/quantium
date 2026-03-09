@@ -2,13 +2,13 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from quantium.core.dimensions import LENGTH, TIME
-from quantium.core.quantity import Unit
+from quantium.core.unit import LinearUnit
 from quantium.units.registry import DEFAULT_REGISTRY as ureg
 
 
 
 # -------------------------------
-# Unit equality (regressions)
+# LinearUnit equality (regressions)
 # -------------------------------
 
 @pytest.mark.regression(reason="Issue #24: Units with identical dim & scale must compare equal regardless of name")
@@ -29,24 +29,24 @@ def test_unit_equality_ignores_name_and_matches_scale_and_dim():
 
 @pytest.mark.regression(reason="Units with different scales are not equal even if dimensions match")
 def test_unit_inequality_different_scale_same_dim():
-    m  = Unit("m", 1.0, LENGTH)
-    cm = Unit("cm", 0.01, LENGTH)
+    m  = LinearUnit("m", 1.0, LENGTH)
+    cm = LinearUnit("cm", 0.01, LENGTH)
     assert m != cm
 
 
 @pytest.mark.regression(reason="Units with different dimensions are not equal even if scales match")
 def test_unit_inequality_different_dim_same_scale():
     # scale 1.0 but different dimensions (LENGTH vs TIME)
-    m = Unit("m", 1.0, LENGTH)
-    s = Unit("s", 1.0, TIME)
+    m = LinearUnit("m", 1.0, LENGTH)
+    s = LinearUnit("s", 1.0, TIME)
     assert m != s
 
 
 @pytest.mark.regression(reason="__eq__ should return NotImplemented for incompatible types")
 def test_unit_equality_with_incompatible_type_returns_notimplemented():
-    m = Unit("m", 1.0, LENGTH)
+    m = LinearUnit("m", 1.0, LENGTH)
     # Direct dunder call to observe NotImplemented (== would coerce to False)
-    assert Unit.__eq__(m, 42) is NotImplemented
+    assert LinearUnit.__eq__(m, 42) is NotImplemented
     assert (m == 42) is False
 
 
